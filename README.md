@@ -5,6 +5,7 @@ An enhanced Python script that automatically categorizes Amazon transactions in 
 ## Features
 
 When you paste in the text from your Amazon order page:
+
 🎯 **Smart Order Matching**: Automatically matches YNAB transactions with Amazon orders by amount and date  
 📝 **Enhanced Memos**: Generates detailed memos with item names and direct Amazon order links  
 🔄 **Intelligent Splitting**: Suggests splitting transactions with multiple items into separate categories  
