@@ -1,6 +1,17 @@
 """YNAB Amazon Categorizer - Automatically categorize Amazon transactions in YNAB."""
 
-__version__ = "0.2.2"
+try:
+    from importlib.metadata import version, PackageNotFoundError
+except ImportError:
+    # Python < 3.8
+    from importlib_metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("ynab-amazon-categorizer")
+except PackageNotFoundError:
+    # Package not installed, use a default version
+    __version__ = "0.0.0+unknown"
+
 __author__ = "dizzlkheinz"
 __description__ = (
     "Automatically categorize Amazon transactions in YNAB with rich item information"
