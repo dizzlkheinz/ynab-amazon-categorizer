@@ -5,7 +5,7 @@
 
 set -e
 
-REPO="ksutkin/ynab-amazon-categorizer"  # Update with your actual GitHub username/repo
+REPO="dizzlkheinz/ynab-amazon-categorizer"
 INSTALL_DIR="$HOME/.local/bin"
 CONFIG_DIR="$HOME/.config/ynab-amazon-categorizer"
 

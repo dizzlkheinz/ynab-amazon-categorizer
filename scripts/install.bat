@@ -4,7 +4,7 @@ REM This script downloads and sets up the YNAB Amazon Categorizer
 
 setlocal enabledelayedexpansion
 
-set "REPO=ksutkin/ynab-amazon-categorizer"
+set "REPO=dizzlkheinz/ynab-amazon-categorizer"
 set "INSTALL_DIR=%USERPROFILE%\AppData\Local\Programs\ynab-amazon-categorizer"
 set "CONFIG_DIR=%USERPROFILE%\AppData\Local\ynab-amazon-categorizer"
 

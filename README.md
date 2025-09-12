@@ -21,29 +21,68 @@ When you paste in the text from your Amazon order page:
 
 ## Installation
 
-1. **Clone or download this script**
+Choose one of the following installation methods:
+
+### Method 1: Quick Install (Easiest - Recommended)
+
+**Linux/Mac:**
+```bash
+curl -sSL https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/install.bat" -OutFile "install.bat"; .\install.bat
+```
+
+This will automatically:
+- Download the executable for your platform
+- Set up the configuration template
+- Add the program to your PATH
+
+### Method 2: Download Executable (No Python Required)
+
+1. **Download the executable for your system:**
+   - **Windows:** [ynab-amazon-categorizer.exe](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer.exe)
+   - **Linux:** [ynab-amazon-categorizer-linux](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-linux)
+
+2. **Download configuration template:** [.env.example](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/.env.example)
+
+3. **Set up configuration:** Rename `.env.example` to `.env` and edit with your credentials
+
+### Method 3: Python Source Code (For Developers)
+
+1. **Download source code:**
    ```bash
-   # Download the files to your computer
+   # Download latest release
+   curl -L -o ynab-amazon-categorizer.zip https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-source.zip
+   unzip ynab-amazon-categorizer.zip
    ```
 
-2. **Install required packages**
+2. **Install required packages:**
    ```bash
    pip install requests prompt_toolkit
    ```
 
-3. **Set up your YNAB API credentials** (choose one method):
-
-### Method 1: Configuration File (Recommended)
-1. Copy `.env.example` to `.env`
-2. Edit `.env` with your credentials:
-   ```
-   YNAB_API_KEY=your_api_key_here
-   YNAB_BUDGET_ID=your_budget_id_here
-   YNAB_ACCOUNT_ID=none
+3. **Set up configuration:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
    ```
 
-### Method 2: Environment Variables
-Set these environment variables:
+## Configuration Setup
+
+After installation, you'll need to set up your YNAB API credentials:
+
+### Configuration File (.env)
+Edit your `.env` file with your credentials:
+```
+YNAB_API_KEY=your_api_key_here
+YNAB_BUDGET_ID=your_budget_id_here
+YNAB_ACCOUNT_ID=none
+```
+
+### Alternative: Environment Variables
 ```bash
 # Windows
 set YNAB_API_KEY=your_api_key_here
@@ -74,6 +113,14 @@ export YNAB_BUDGET_ID=your_budget_id_here
 ## Usage
 
 ### Basic Usage
+
+**If installed via Quick Install or Executable:**
+```bash
+# All platforms (executable)
+ynab-amazon-categorizer
+```
+
+**If using Python source code:**
 ```bash
 # Windows (with emoji support)
 python -X utf8 ynab_amazon_categorizer.py
