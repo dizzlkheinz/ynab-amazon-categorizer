@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "setuptools-scm>=8", "wheel"]
+requires = ["setuptools>=64", "setuptools-scm[toml]>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -42,7 +42,7 @@ Issues = "https://github.com/dizzlkheinz/ynab-amazon-categorizer/issues"
 [project.scripts]
 ynab-amazon-categorizer = "ynab_amazon_categorizer.cli:main"
 
-[tool.setuptools-scm]
+[tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "node-and-date"
 write_to = "src/ynab_amazon_categorizer/_version.py"
