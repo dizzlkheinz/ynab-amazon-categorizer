@@ -16,21 +16,29 @@ When you paste in the text from your Amazon order page:
 ## Prerequisites
 
 - Python 3.7+
+- [uv](https://docs.astral.sh/uv/) (recommended) or standard Python tooling
 - YNAB account with API access
 
 ## Installation
 
-### Method 1: Install from PyPI (Recommended)
+### Method 1: Run with uvx (Recommended)
 
 ```bash
-# Install with pipx (recommended for CLI tools)
-pipx install ynab-amazon-categorizer
-
-# Or install with pip
-pip install ynab-amazon-categorizer
+# Run directly without installing (fastest and cleanest)
+uvx ynab-amazon-categorizer
 ```
 
-### Method 2: Development Installation
+### Method 2: Install as a tool
+
+```bash
+# Install globally with uv
+uv tool install ynab-amazon-categorizer
+
+# Then run
+ynab-amazon-categorizer
+```
+
+### Method 3: Development Installation
 
 ```bash
 # Clone the repository
@@ -38,7 +46,7 @@ git clone https://github.com/dizzlkheinz/ynab-amazon-categorizer.git
 cd ynab-amazon-categorizer
 
 # Install in development mode
-pip install -e .
+uv pip install -e .
 ```
 
 ## Configuration Setup
@@ -86,7 +94,10 @@ export YNAB_BUDGET_ID=your_budget_id_here
 ### Basic Usage
 
 ```bash
-# Run the CLI tool
+# Run with uvx (no installation needed)
+uvx ynab-amazon-categorizer
+
+# Or if installed as a tool
 ynab-amazon-categorizer
 
 # Or run as a Python module
