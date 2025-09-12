@@ -44,6 +44,7 @@ ynab-amazon-categorizer = "ynab_amazon_categorizer.cli:main"
 
 [tool.setuptools-scm]
 write_to = "src/ynab_amazon_categorizer/_version.py"
+fallback_version = "0.0.0+unknown"
 
 [tool.setuptools.packages.find]
 where = ["src"]
