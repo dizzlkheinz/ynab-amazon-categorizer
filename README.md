@@ -1,6 +1,6 @@
 # YNAB Amazon Categorizer
 
-An enhanced Python script that automatically categorizes Amazon transactions in YNAB (You Need A Budget) with rich item information and automatic memo generation.
+An enhanced Python package that automatically categorizes Amazon transactions in YNAB (You Need A Budget) with rich item information and automatic memo generation.
 
 ## Features
 
@@ -17,66 +17,36 @@ When you paste in the text from your Amazon order page:
 
 - Python 3.7+
 - YNAB account with API access
-- Required Python packages: `requests`, `prompt_toolkit`
 
 ## Installation
 
-Choose one of the following installation methods:
+### Method 1: Install from PyPI (Recommended)
 
-### Method 1: Quick Install (Easiest - Recommended)
-
-**Linux/Mac:**
 ```bash
-curl -sSL https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/install.sh | bash
+# Install with pipx (recommended for CLI tools)
+pipx install ynab-amazon-categorizer
+
+# Or install with pip
+pip install ynab-amazon-categorizer
 ```
 
-**Windows (PowerShell):**
-```powershell
-Invoke-WebRequest -Uri "https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/install.bat" -OutFile "install.bat"; .\install.bat
+### Method 2: Development Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/dizzlkheinz/ynab-amazon-categorizer.git
+cd ynab-amazon-categorizer
+
+# Install in development mode
+pip install -e .
 ```
-
-This will automatically:
-- Download the executable for your platform
-- Set up the configuration template
-- Add the program to your PATH
-
-### Method 2: Download Executable (No Python Required)
-
-1. **Download the executable for your system:**
-   - **Windows:** [ynab-amazon-categorizer.exe](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer.exe)
-   - **Linux:** [ynab-amazon-categorizer-linux](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-linux)
-   - **macOS:** [ynab-amazon-categorizer-macos](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-macos)
-
-2. **Download configuration template:** [.env.example](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/.env.example)
-
-3. **Set up configuration:** Rename `.env.example` to `.env` and edit with your credentials
-
-### Method 3: Python Source Code (For Developers)
-
-1. **Download source code:**
-   ```bash
-   # Download latest release
-   curl -L -o ynab-amazon-categorizer.zip https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-source.zip
-   unzip ynab-amazon-categorizer.zip
-   ```
-
-2. **Install required packages:**
-   ```bash
-   pip install requests prompt_toolkit
-   ```
-
-3. **Set up configuration:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your credentials
-   ```
 
 ## Configuration Setup
 
 After installation, you'll need to set up your YNAB API credentials:
 
 ### Configuration File (.env)
-Edit your `.env` file with your credentials:
+Create a `.env` file in your working directory with your credentials:
 ```
 YNAB_API_KEY=your_api_key_here
 YNAB_BUDGET_ID=your_budget_id_here
@@ -115,26 +85,19 @@ export YNAB_BUDGET_ID=your_budget_id_here
 
 ### Basic Usage
 
-**If installed via Quick Install or Executable:**
 ```bash
-# All platforms (executable)
+# Run the CLI tool
 ynab-amazon-categorizer
-```
 
-**If using Python source code:**
-```bash
-# Windows (with emoji support)
-python -X utf8 ynab_amazon_categorizer.py
-
-# Mac/Linux
-python3 ynab_amazon_categorizer.py
+# Or run as a Python module
+python -m ynab_amazon_categorizer
 ```
 
 ### Workflow
 1. **Provide Amazon Orders Data** (optional but recommended):
    - Copy your Amazon orders page content
      - For example go to https://www.amazon.ca/gp/css/order-history?ref_=nav_orders_first and select all and copy the text
-   - Run ynab_amazon_categorizer.py and paste amazon order info when prompted 
+   - Run the tool and paste Amazon order info when prompted 
    - The script will automatically match transactions with orders
 
 2. **Review Matched Transactions**:
@@ -212,7 +175,7 @@ Fancy Feast Grilled Wet Cat Food, Tuna Feast - 85 g Can (24 Pack)
 
 ## Contributing
 
-This script was developed to streamline YNAB Amazon transaction categorization. Feel free to suggest improvements or report issues!
+This package was developed to streamline YNAB Amazon transaction categorization. Feel free to suggest improvements or report issues!
 
 ## License
 

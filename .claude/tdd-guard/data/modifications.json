@@ -1,11 +1,10 @@
 {
   "session_id": "bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6",
   "transcript_path": "C:\\Users\\ksutk\\.claude\\projects\\C--Users-ksutk-projects-ynab-amazon-categorizer\\bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6.jsonl",
-  "hook_event_name": "PostToolUse",
-  "tool_name": "Edit",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Write",
   "tool_input": {
-    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\scripts\\install.sh",
-    "old_string": "# Use Linux executable (works on most Unix-like systems)\nPLATFORM=\"linux\"",
-    "new_string": "# Detect platform\nPLATFORM=\"\"\nif [[ \"$OSTYPE\" == \"linux-gnu\"* ]]; then\n    PLATFORM=\"linux\"\nelif [[ \"$OSTYPE\" == \"darwin\"* ]]; then\n    PLATFORM=\"macos\"\nelse\n    echo \"❌ Unsupported platform: $OSTYPE\"\n    echo \"Supported platforms: Linux, macOS\"\n    exit 1\nfi"
+    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\src\\ynab_amazon_categorizer\\__main__.py",
+    "content": "\"\"\"Allow running the package as a module with python -m ynab_amazon_categorizer.\"\"\"\n\nfrom .cli import main\n\nif __name__ == \"__main__\":\n    main()"
   }
 }

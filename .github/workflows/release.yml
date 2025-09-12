@@ -1,4 +1,4 @@
-name: Create Release
+name: Publish to PyPI
 
 on:
   push:
@@ -6,13 +6,11 @@ on:
       - 'v*'
 
 jobs:
-  build-linux:
+  test:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -22,81 +20,46 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        pip install -e .
     
-    - name: Create Linux executable
+    - name: Test package can be imported and run
       run: |
-        pyinstaller --onefile --name ynab-amazon-categorizer-linux ynab_amazon_categorizer.py
-        chmod +x dist/ynab-amazon-categorizer-linux
-    
-    - name: Upload Linux executable
-      uses: actions/upload-artifact@v4
-      with:
-        name: linux-executable
-        path: dist/ynab-amazon-categorizer-linux
+        python -c "from ynab_amazon_categorizer.cli import main; print('Package imports successfully')"
 
-  build-windows:
-    runs-on: windows-latest
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
     
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
-    - name: Install dependencies
+    - name: Install build dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        pip install build twine
     
-    - name: Create Windows executable
-      run: |
-        pyinstaller --onefile --name ynab-amazon-categorizer.exe ynab_amazon_categorizer.py
+    - name: Build package
+      run: python -m build
     
-    - name: Upload Windows executable
-      uses: actions/upload-artifact@v4
+    - name: Check package
+      run: twine check dist/*
+    
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        name: windows-executable
-        path: dist/ynab-amazon-categorizer.exe
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-    
-    - name: Create macOS executable
-      run: |
-        pyinstaller --onefile --name ynab-amazon-categorizer-macos ynab_amazon_categorizer.py
-        chmod +x dist/ynab-amazon-categorizer-macos
-    
-    - name: Upload macOS executable
-      uses: actions/upload-artifact@v4
-      with:
-        name: macos-executable
-        path: dist/ynab-amazon-categorizer-macos
+        password: ${{ secrets.PYPI_API_TOKEN }}
 
   create-release:
-    needs: [build-linux, build-windows, build-macos]
+    needs: [test, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -105,54 +68,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history for changelog generation
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Download Linux executable
-      uses: actions/download-artifact@v4
-      with:
-        name: linux-executable
-        path: ./artifacts/
-    
-    - name: Download Windows executable
-      uses: actions/download-artifact@v4
-      with:
-        name: windows-executable
-        path: ./artifacts/
-    
-    - name: Download macOS executable
-      uses: actions/download-artifact@v4
-      with:
-        name: macos-executable
-        path: ./artifacts/
-    
-    - name: Create release package
-      run: |
-        mkdir -p release
-        
-        # Copy main files
-        cp ynab_amazon_categorizer.py release/
-        cp requirements.txt release/
-        cp .env.example release/
-        cp README.md release/
-        cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
-        
-        # Copy executables
-        cp ./artifacts/ynab-amazon-categorizer-linux release/ 2>/dev/null || echo "Linux executable not found"
-        cp ./artifacts/ynab-amazon-categorizer.exe release/ 2>/dev/null || echo "Windows executable not found"
-        cp ./artifacts/ynab-amazon-categorizer-macos release/ 2>/dev/null || echo "macOS executable not found"
-        
-        # Copy installation scripts
-        cp scripts/install.sh release/ 2>/dev/null || echo "install.sh not found"
-        cp scripts/install.bat release/ 2>/dev/null || echo "install.bat not found"
-        
-        # Create source archive
-        zip -r ynab-amazon-categorizer-source.zip release/
-        tar -czf ynab-amazon-categorizer-source.tar.gz -C release .
+        fetch-depth: 0
     
     - name: Extract version from tag
       id: version
@@ -177,25 +93,24 @@ jobs:
         
         ## Installation
         
-        Choose one of the following methods:
+        This package is now available on PyPI! Install it with:
         
-        ### Method 1: Download Executable (Easiest)
-        1. Download the executable for your system:
-           - Windows: \`ynab-amazon-categorizer.exe\`
-           - Linux: \`ynab-amazon-categorizer-linux\`
-           - macOS: \`ynab-amazon-categorizer-macos\`
-        2. Download \`.env.example\` and rename to \`.env\`
-        3. Edit \`.env\` with your YNAB credentials
-        4. Run the executable
+        \`\`\`bash
+        # Install with pipx (recommended for CLI tools)
+        pipx install ynab-amazon-categorizer
         
-        ### Method 2: Python Script
-        1. Download \`ynab-amazon-categorizer-source.zip\`
-        2. Extract and run: \`python -X utf8 ynab_amazon_categorizer.py\`
+        # Or install with pip
+        pip install ynab-amazon-categorizer
+        \`\`\`
         
-        ### Method 3: Quick Install Script
-        1. Download and run \`install.sh\` (Linux/Mac) or \`install.bat\` (Windows)
+        ## Usage
         
-        See README.md for detailed setup instructions.
+        After installation, run:
+        \`\`\`bash
+        ynab-amazon-categorizer
+        \`\`\`
+        
+        See README.md for detailed setup and configuration instructions.
         EOF
     
     - name: Create GitHub Release
@@ -205,15 +120,7 @@ jobs:
         name: Release ${{ steps.version.outputs.VERSION }}
         body_path: CHANGELOG.md
         files: |
-          release/ynab-amazon-categorizer-linux
-          release/ynab-amazon-categorizer.exe
-          release/ynab-amazon-categorizer-macos
-          release/.env.example
-          release/README.md
-          release/install.sh
-          release/install.bat
-          ynab-amazon-categorizer-source.zip
-          ynab-amazon-categorizer-source.tar.gz
+          README.md
         draft: false
         prerelease: false
       env:

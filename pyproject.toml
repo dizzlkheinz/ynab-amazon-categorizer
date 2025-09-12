@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ynab-amazon-categorizer"
+version = "1.0.0"
+description = "Automatically categorize Amazon transactions in YNAB with rich item information"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {text = "GPL-3.0"}
+authors = [
+    {name = "dizzlkheinz"},
+]
+keywords = ["ynab", "amazon", "budgeting", "finance", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "requests>=2.25.0",
+    "prompt_toolkit>=3.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/dizzlkheinz/ynab-amazon-categorizer"
+Repository = "https://github.com/dizzlkheinz/ynab-amazon-categorizer"
+Issues = "https://github.com/dizzlkheinz/ynab-amazon-categorizer/issues"
+
+[project.scripts]
+ynab-amazon-categorizer = "ynab_amazon_categorizer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ynab_amazon_categorizer = ["*.txt", "*.md"]
