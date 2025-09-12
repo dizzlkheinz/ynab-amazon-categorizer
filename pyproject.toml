@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ynab-amazon-categorizer"
-version = "0.2.1"
+version = "0.2.2"
 description = "Automatically categorize Amazon transactions in YNAB with rich item information"
 readme = "README.md"
 requires-python = ">=3.7"
