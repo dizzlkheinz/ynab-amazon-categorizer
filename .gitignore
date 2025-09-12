@@ -1,4 +1,5 @@
 # YNAB API Credentials - NEVER COMMIT THESE!
+.env
 ynab_config.txt
 api_key.txt
 
@@ -42,3 +43,8 @@ Thumbs.db
 # History files
 .ynab_amazon_cat_history
 .ynab_amazon_memo_history
+
+# Release files
+RELEASE_NOTES.md
+temp_release.json
+release/

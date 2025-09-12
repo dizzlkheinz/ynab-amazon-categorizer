@@ -1,0 +1,126 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create standalone executable (Linux)
+      run: |
+        pyinstaller --onefile --name ynab-amazon-categorizer-linux ynab_amazon_categorizer.py
+        chmod +x dist/ynab-amazon-categorizer-linux
+    
+    - name: Set up Windows cross-compilation
+      run: |
+        pip install pyinstaller[windows]
+    
+    - name: Create Windows executable
+      run: |
+        pyinstaller --onefile --name ynab-amazon-categorizer.exe ynab_amazon_categorizer.py
+    
+    - name: Create release package
+      run: |
+        mkdir -p release
+        
+        # Copy main files
+        cp ynab_amazon_categorizer.py release/
+        cp requirements.txt release/
+        cp .env.example release/
+        cp README.md release/
+        cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
+        
+        # Copy executables
+        cp dist/ynab-amazon-categorizer-linux release/ 2>/dev/null || echo "Linux executable not found"
+        cp dist/ynab-amazon-categorizer.exe release/ 2>/dev/null || echo "Windows executable not found"
+        
+        # Copy installation scripts
+        cp scripts/install.sh release/ 2>/dev/null || echo "install.sh not found"
+        cp scripts/install.bat release/ 2>/dev/null || echo "install.bat not found"
+        
+        # Create source archive
+        zip -r ynab-amazon-categorizer-source.zip release/
+        tar -czf ynab-amazon-categorizer-source.tar.gz -C release .
+    
+    - name: Extract version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        if [ -n "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" HEAD~10..HEAD)
+        fi
+        
+        # Create changelog file
+        cat > CHANGELOG.md << EOF
+        ## What's Changed
+        
+        $CHANGELOG
+        
+        ## Installation
+        
+        Choose one of the following methods:
+        
+        ### Method 1: Download Executable (Easiest)
+        1. Download the appropriate executable for your system:
+           - Windows: \`ynab-amazon-categorizer.exe\`
+           - Linux: \`ynab-amazon-categorizer-linux\`
+        2. Download \`.env.example\` and rename to \`.env\`
+        3. Edit \`.env\` with your YNAB credentials
+        4. Run the executable
+        
+        ### Method 2: Python Script
+        1. Download \`ynab-amazon-categorizer-source.zip\`
+        2. Extract and run: \`python -X utf8 ynab_amazon_categorizer.py\`
+        
+        ### Method 3: Quick Install Script
+        1. Download and run \`install.sh\` (Linux/Mac) or \`install.bat\` (Windows)
+        
+        See README.md for detailed setup instructions.
+        EOF
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.VERSION }}
+        name: Release ${{ steps.version.outputs.VERSION }}
+        body_path: CHANGELOG.md
+        files: |
+          release/ynab-amazon-categorizer.exe
+          release/ynab-amazon-categorizer-linux
+          release/.env.example
+          release/README.md
+          release/install.sh
+          release/install.bat
+          ynab-amazon-categorizer-source.zip
+          ynab-amazon-categorizer-source.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

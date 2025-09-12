@@ -1,0 +1,11 @@
+{
+  "session_id": "bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6",
+  "transcript_path": "C:\\Users\\ksutk\\.claude\\projects\\C--Users-ksutk-projects-ynab-amazon-categorizer\\bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6.jsonl",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\.gitignore",
+    "old_string": "# History files\n.ynab_amazon_cat_history\n.ynab_amazon_memo_history",
+    "new_string": "# History files\n.ynab_amazon_cat_history\n.ynab_amazon_memo_history\n\n# Release files\nRELEASE_NOTES.md\ntemp_release.json\nrelease/"
+  }
+}

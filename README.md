@@ -34,8 +34,8 @@ When you paste in the text from your Amazon order page:
 3. **Set up your YNAB API credentials** (choose one method):
 
 ### Method 1: Configuration File (Recommended)
-1. Copy `ynab_config.txt.example` to `ynab_config.txt`
-2. Edit `ynab_config.txt` with your credentials:
+1. Copy `.env.example` to `.env`
+2. Edit `.env` with your credentials:
    ```
    YNAB_API_KEY=your_api_key_here
    YNAB_BUDGET_ID=your_budget_id_here
@@ -138,11 +138,11 @@ Fancy Feast Grilled Wet Cat Food, Tuna Feast - 85 g Can (24 Pack)
 
 ## Security Notes
 
-⚠️ **Important**: Never commit your `ynab_config.txt` file to version control!
+⚠️ **Important**: Never commit your `.env` file to version control!
 
 - The script loads credentials from environment variables or config file
 - Your API key is never hardcoded in the script
-- Add `ynab_config.txt` to your `.gitignore` if using git
+- Add `.env` to your `.gitignore` if using git
 
 ## Troubleshooting
 
@@ -151,7 +151,7 @@ Fancy Feast Grilled Wet Cat Food, Tuna Feast - 85 g Can (24 Pack)
 - Try copying from a different browser or clearing browser cache
 
 ### "API Key not found"
-- Verify your `ynab_config.txt` file exists and has the correct format
+- Verify your `.env` file exists and has the correct format
 - Check that your API key is valid in YNAB Developer Settings
 
 ### "No transactions found"
