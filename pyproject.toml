@@ -43,7 +43,7 @@ Issues = "https://github.com/dizzlkheinz/ynab-amazon-categorizer/issues"
 ynab-amazon-categorizer = "ynab_amazon_categorizer.cli:main"
 
 [tool.setuptools-scm]
-# Automatically determine version from git tags
+write_to = "src/ynab_amazon_categorizer/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]
