@@ -6,7 +6,97 @@ on:
       - 'v*'
 
 jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create Linux executable
+      run: |
+        pyinstaller --onefile --name ynab-amazon-categorizer-linux ynab_amazon_categorizer.py
+        chmod +x dist/ynab-amazon-categorizer-linux
+    
+    - name: Upload Linux executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-executable
+        path: dist/ynab-amazon-categorizer-linux
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create Windows executable
+      run: |
+        pyinstaller --onefile --name ynab-amazon-categorizer.exe ynab_amazon_categorizer.py
+    
+    - name: Upload Windows executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-executable
+        path: dist/ynab-amazon-categorizer.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create macOS executable
+      run: |
+        pyinstaller --onefile --name ynab-amazon-categorizer-macos ynab_amazon_categorizer.py
+        chmod +x dist/ynab-amazon-categorizer-macos
+    
+    - name: Upload macOS executable
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-executable
+        path: dist/ynab-amazon-categorizer-macos
+
   create-release:
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,16 +112,23 @@ jobs:
       with:
         python-version: '3.9'
     
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+    - name: Download Linux executable
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-executable
+        path: ./artifacts/
     
-    - name: Create standalone executable (Linux)
-      run: |
-        pyinstaller --onefile --name ynab-amazon-categorizer-linux ynab_amazon_categorizer.py
-        chmod +x dist/ynab-amazon-categorizer-linux
+    - name: Download Windows executable
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-executable
+        path: ./artifacts/
+    
+    - name: Download macOS executable
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-executable
+        path: ./artifacts/
     
     - name: Create release package
       run: |
@@ -45,7 +142,9 @@ jobs:
         cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
         
         # Copy executables
-        cp dist/ynab-amazon-categorizer-linux release/ 2>/dev/null || echo "Linux executable not found"
+        cp ./artifacts/ynab-amazon-categorizer-linux release/ 2>/dev/null || echo "Linux executable not found"
+        cp ./artifacts/ynab-amazon-categorizer.exe release/ 2>/dev/null || echo "Windows executable not found"
+        cp ./artifacts/ynab-amazon-categorizer-macos release/ 2>/dev/null || echo "macOS executable not found"
         
         # Copy installation scripts
         cp scripts/install.sh release/ 2>/dev/null || echo "install.sh not found"
@@ -81,7 +180,10 @@ jobs:
         Choose one of the following methods:
         
         ### Method 1: Download Executable (Easiest)
-        1. Download the Linux executable: \`ynab-amazon-categorizer-linux\`
+        1. Download the executable for your system:
+           - Windows: \`ynab-amazon-categorizer.exe\`
+           - Linux: \`ynab-amazon-categorizer-linux\`
+           - macOS: \`ynab-amazon-categorizer-macos\`
         2. Download \`.env.example\` and rename to \`.env\`
         3. Edit \`.env\` with your YNAB credentials
         4. Run the executable
@@ -104,6 +206,8 @@ jobs:
         body_path: CHANGELOG.md
         files: |
           release/ynab-amazon-categorizer-linux
+          release/ynab-amazon-categorizer.exe
+          release/ynab-amazon-categorizer-macos
           release/.env.example
           release/README.md
           release/install.sh

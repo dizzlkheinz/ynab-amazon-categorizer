@@ -15,8 +15,17 @@ echo "🎯 Installing YNAB Amazon Categorizer..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 
-# Use Linux executable (works on most Unix-like systems)
-PLATFORM="linux"
+# Detect platform
+PLATFORM=""
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    PLATFORM="linux"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    PLATFORM="macos"
+else
+    echo "❌ Unsupported platform: $OSTYPE"
+    echo "Supported platforms: Linux, macOS"
+    exit 1
+fi
 
 # Get latest release info
 echo "📡 Getting latest release information..."

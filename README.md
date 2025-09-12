@@ -45,6 +45,7 @@ This will automatically:
 1. **Download the executable for your system:**
    - **Windows:** [ynab-amazon-categorizer.exe](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer.exe)
    - **Linux:** [ynab-amazon-categorizer-linux](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-linux)
+   - **macOS:** [ynab-amazon-categorizer-macos](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/ynab-amazon-categorizer-macos)
 
 2. **Download configuration template:** [.env.example](https://github.com/dizzlkheinz/ynab-amazon-categorizer/releases/latest/download/.env.example)
 
