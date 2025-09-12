@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for changelog generation
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -31,14 +33,6 @@ jobs:
         pyinstaller --onefile --name ynab-amazon-categorizer-linux ynab_amazon_categorizer.py
         chmod +x dist/ynab-amazon-categorizer-linux
     
-    - name: Set up Windows cross-compilation
-      run: |
-        pip install pyinstaller[windows]
-    
-    - name: Create Windows executable
-      run: |
-        pyinstaller --onefile --name ynab-amazon-categorizer.exe ynab_amazon_categorizer.py
-    
     - name: Create release package
       run: |
         mkdir -p release
@@ -52,7 +46,6 @@ jobs:
         
         # Copy executables
         cp dist/ynab-amazon-categorizer-linux release/ 2>/dev/null || echo "Linux executable not found"
-        cp dist/ynab-amazon-categorizer.exe release/ 2>/dev/null || echo "Windows executable not found"
         
         # Copy installation scripts
         cp scripts/install.sh release/ 2>/dev/null || echo "install.sh not found"
@@ -74,7 +67,7 @@ jobs:
         if [ -n "$LAST_TAG" ]; then
           CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
         else
-          CHANGELOG=$(git log --pretty=format:"- %s" HEAD~10..HEAD)
+          CHANGELOG=$(git log --pretty=format:"- %s" --max-count=10)
         fi
         
         # Create changelog file
@@ -88,9 +81,7 @@ jobs:
         Choose one of the following methods:
         
         ### Method 1: Download Executable (Easiest)
-        1. Download the appropriate executable for your system:
-           - Windows: \`ynab-amazon-categorizer.exe\`
-           - Linux: \`ynab-amazon-categorizer-linux\`
+        1. Download the Linux executable: \`ynab-amazon-categorizer-linux\`
         2. Download \`.env.example\` and rename to \`.env\`
         3. Edit \`.env\` with your YNAB credentials
         4. Run the executable
@@ -112,7 +103,6 @@ jobs:
         name: Release ${{ steps.version.outputs.VERSION }}
         body_path: CHANGELOG.md
         files: |
-          release/ynab-amazon-categorizer.exe
           release/ynab-amazon-categorizer-linux
           release/.env.example
           release/README.md

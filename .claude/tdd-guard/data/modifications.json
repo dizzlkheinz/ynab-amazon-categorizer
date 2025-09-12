@@ -4,8 +4,8 @@
   "hook_event_name": "PostToolUse",
   "tool_name": "Edit",
   "tool_input": {
-    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\scripts\\install.bat",
-    "old_string": "set \"REPO=ksutkin/ynab-amazon-categorizer\"",
-    "new_string": "set \"REPO=dizzlkheinz/ynab-amazon-categorizer\""
+    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\scripts\\install.sh",
+    "old_string": "# Detect platform\nPLATFORM=\"\"\nif [[ \"$OSTYPE\" == \"linux-gnu\"* ]]; then\n    PLATFORM=\"linux\"\nelif [[ \"$OSTYPE\" == \"darwin\"* ]]; then\n    PLATFORM=\"linux\"  # Use linux build for Mac too, or create separate Mac build\nelse\n    echo \"❌ Unsupported platform: $OSTYPE\"\n    exit 1\nfi",
+    "new_string": "# Use Linux executable (works on most Unix-like systems)\nPLATFORM=\"linux\""
   }
 }
