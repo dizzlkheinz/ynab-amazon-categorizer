@@ -1,10 +1,11 @@
 {
-  "session_id": "bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6",
-  "transcript_path": "C:\\Users\\ksutk\\.claude\\projects\\C--Users-ksutk-projects-ynab-amazon-categorizer\\bffb4a40-5bd7-47b6-b7d2-ce8ec612b0c6.jsonl",
+  "session_id": "1c381da6-10a8-40e8-af53-f0861df99e92",
+  "transcript_path": "C:\\Users\\ksutk\\.claude\\projects\\C--Users-ksutk-projects-ynab-amazon-categorizer\\1c381da6-10a8-40e8-af53-f0861df99e92.jsonl",
   "hook_event_name": "PreToolUse",
-  "tool_name": "Write",
+  "tool_name": "Edit",
   "tool_input": {
-    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\src\\ynab_amazon_categorizer\\__main__.py",
-    "content": "\"\"\"Allow running the package as a module with python -m ynab_amazon_categorizer.\"\"\"\n\nfrom .cli import main\n\nif __name__ == \"__main__\":\n    main()"
+    "file_path": "C:\\Users\\ksutk\\projects\\ynab-amazon-categorizer\\tests\\test_config.py",
+    "old_string": "def test_config_from_env_vars(monkeypatch):\n    \"\"\"Test loading config from environment variables.\"\"\"\n    monkeypatch.setenv(\"YNAB_API_KEY\", \"test_api_key\")\n    monkeypatch.setenv(\"YNAB_BUDGET_ID\", \"test_budget_id\")\n\n    config = Config.from_env()\n    assert config.api_key == \"test_api_key\"\n    assert config.budget_id == \"test_budget_id\"",
+    "new_string": "def test_config_from_env_vars(monkeypatch):\n    \"\"\"Test loading config from environment variables.\"\"\"\n    monkeypatch.setenv(\"YNAB_API_KEY\", \"test_api_key\")\n    monkeypatch.setenv(\"YNAB_BUDGET_ID\", \"test_budget_id\")\n\n    config = Config.from_env()\n    assert config.api_key == \"test_api_key\"\n    assert config.budget_id == \"test_budget_id\"\n    assert config.account_id == \"none\"  # Should default to \"none\""
   }
 }

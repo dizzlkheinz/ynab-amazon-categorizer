@@ -1,0 +1,19 @@
+{
+  "testModules": [
+    {
+      "moduleId": "tests/test_config.py",
+      "tests": [
+        {
+          "name": "test_config_from_env_vars",
+          "fullName": "tests/test_config.py::test_config_from_env_vars",
+          "state": "passed"
+        },
+        {
+          "name": "test_config_missing_env_vars",
+          "fullName": "tests/test_config.py::test_config_missing_env_vars",
+          "state": "passed"
+        }
+      ]
+    }
+  ]
+}

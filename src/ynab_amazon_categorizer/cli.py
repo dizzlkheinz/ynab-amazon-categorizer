@@ -1,15 +1,22 @@
-import requests
 import json
-from datetime import datetime
 import os  # For history file path
 import re  # For order ID extraction
+from datetime import datetime
 
 # --- NEW: Import prompt_toolkit components ---
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+
+from .amazon_parser import AmazonParser
+
 # --- END NEW ---
+# --- Import extracted modules ---
+from .config import Config
+from .memo_generator import MemoGenerator
+from .transaction_matcher import TransactionMatcher
+from .ynab_client import YNABClient
 
 # --- CONFIGURATION ---
 
@@ -20,66 +27,11 @@ YNAB_API_URL = "https://api.ynab.com/v1"
 # --- Amazon Order Link Functions ---
 
 
-def generate_amazon_order_link(order_id):
-    """Generate Amazon.ca order details link"""
-    if order_id:
-        return f"https://www.amazon.ca/gp/your-account/order-details?ie=UTF8&orderID={order_id}"
-    return None
+# NOTE: Memo generation functions have been moved to memo_generator.py
 
 
-def add_amazon_link_to_memo(original_memo, order_link):
-    """Add Amazon order link to memo, avoiding duplicates"""
-    if not order_link:
-        return original_memo
-
-    memo = original_memo or ""
-
-    # Check if link already exists
-    if order_link in memo:
-        return memo
-
-    # Add link with separator if memo already has content
-    if memo.strip():
-        return f"{memo}\n\nAmazon Order: {order_link}"
-    else:
-        return f"Amazon Order: {order_link}"
-
-
-def generate_enhanced_memo(original_memo, order_id, item_details=None):
-    """Generate enhanced memo with order information and item details"""
-    memo_parts = []
-
-    # Start with original memo if it exists
-    if original_memo and original_memo.strip():
-        memo_parts.append(original_memo.strip())
-
-    # Add order information
-    if order_id:
-        order_link = generate_amazon_order_link(order_id)
-        if order_link:
-            memo_parts.append(f"Amazon Order: {order_link}")
-
-    # Add item details if provided
-    if item_details:
-        if isinstance(item_details, dict):
-            # Handle structured item data
-            item_info = []
-            if item_details.get("title"):
-                item_info.append(f"Item: {item_details['title']}")
-            if item_details.get("quantity"):
-                item_info.append(f"Qty: {item_details['quantity']}")
-            if item_details.get("price"):
-                item_info.append(f"Price: ${item_details['price']:.2f}")
-            if item_info:
-                memo_parts.append(" | ".join(item_info))
-        elif isinstance(item_details, str) and item_details.strip():
-            # Handle simple string item description
-            memo_parts.append(f"Item: {item_details.strip()}")
-
-    return "\n\n".join(memo_parts) if memo_parts else original_memo or ""
-
-
-def parse_amazon_orders_page(orders_text):
+# NOTE: Amazon order parsing has been moved to amazon_parser.py
+def parse_amazon_orders_page_REMOVED():
     """Parse Amazon orders page text to extract order information"""
     orders = []
 
@@ -210,15 +162,15 @@ def prompt_for_amazon_orders_data():
     if not orders_text.strip():
         return None
 
-    parsed_orders = parse_amazon_orders_page(orders_text)
+    # Use extracted Amazon parser
+    amazon_parser = AmazonParser()
+    parsed_orders = amazon_parser.parse_orders_page(orders_text)
 
     # Show what was parsed
     if parsed_orders:
         print(f"\n✓ Successfully parsed {len(parsed_orders)} orders from Amazon data")
         for order in parsed_orders[:3]:
-            print(
-                f"  - Order {order['order_id']}: ${order['total']} on {order['date']}"
-            )
+            print(f"  - Order {order.order_id}: ${order.total} on {order.date_str}")
         if len(parsed_orders) > 3:
             print(f"  ... and {len(parsed_orders) - 3} more orders")
     else:
@@ -248,8 +200,8 @@ def find_matching_order(transaction_amount, transaction_date, parsed_orders):
         score = 0
 
         # Check amount match (most important)
-        if "total" in order:
-            amount_diff = abs(order["total"] - transaction_amount_abs)
+        if hasattr(order, "total") and order.total:
+            amount_diff = abs(order.total - transaction_amount_abs)
             if amount_diff < 0.01:  # Exact match
                 score += 100
             elif amount_diff < 1.00:  # Close match
@@ -258,10 +210,10 @@ def find_matching_order(transaction_amount, transaction_date, parsed_orders):
                 score += 20
 
         # Check date proximity
-        if trans_date and "date" in order:
+        if trans_date and hasattr(order, "date_str") and order.date_str:
             try:
                 # Parse order date (format like "July 31, 2025")
-                order_date = datetime.strptime(order["date"], "%B %d, %Y")
+                order_date = datetime.strptime(order.date_str, "%B %d, %Y")
                 date_diff = abs((trans_date - order_date).days)
                 if date_diff <= 1:  # Same or next day
                     score += 30
@@ -306,10 +258,14 @@ def get_multiline_input_with_custom_submit(prompt_message="Enter multiline text:
 
 def generate_split_summary_memo(matching_order):
     """Generate a summary memo for split transactions showing all items"""
-    if not matching_order or not matching_order.get("items"):
+    if (
+        not matching_order
+        or not hasattr(matching_order, "items")
+        or not matching_order.items
+    ):
         return ""
 
-    items = matching_order["items"]
+    items = matching_order.items
     if len(items) == 1:
         return items[0]
 
@@ -367,93 +323,14 @@ def prompt_for_item_details():
     return item_details if item_details else None
 
 
-# --- Helper Functions (Assume they are here as in v3) ---
-def get_ynab_data(endpoint, api_key):
-    # ... (implementation from v3) ...
-    headers = {"Authorization": f"Bearer {api_key}"}
-    url = f"{YNAB_API_URL}{endpoint}"
-    response = None
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()["data"]
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching YNAB data from {endpoint}: {e}")
-        if response is not None:
-            print(f"Response status: {response.status_code}")
-            print(f"Response text: {response.text}")
-        return None
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON response from {endpoint}")
-        if response is not None:
-            print(f"Response text: {response.text}")
-        return None
+# --- Helper Functions ---
+# NOTE: YNAB API functions have been moved to ynab_client.py
 
 
-def update_ynab_transaction(transaction_id, payload, api_key, budget_id):
-    # ... (implementation from v3) ...
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    url = f"{YNAB_API_URL}/budgets/{budget_id}/transactions/{transaction_id}"
-    response = None
-    try:
-        response = requests.put(url, headers=headers, json={"transaction": payload})
-        response.raise_for_status()
-        print(f"Successfully updated transaction {transaction_id}")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"Error updating YNAB transaction {transaction_id}: {e}")
-        if response is not None:
-            print(f"Response status: {response.status_code}")
-            print(f"Response text: {response.text}")
-        return False
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON response when updating {transaction_id}")
-        if response is not None:
-            print(f"Response text: {response.text}")
-        return False
+# NOTE: update_ynab_transaction moved to ynab_client.py
 
 
-def get_categories(budget_id, api_key):
-    # ... (implementation from v3) ...
-    data = get_ynab_data(f"/budgets/{budget_id}/categories", api_key)
-    if not data or "category_groups" not in data:
-        print("Could not fetch categories.")
-        return [], {}, {}
-
-    category_list_for_completer = []
-    name_to_id_lookup = {}
-    id_to_name_lookup = {}
-    internal_master_category_group_id = None
-
-    for group in data["category_groups"]:
-        if group.get("name") == "Internal Master Category":
-            internal_master_category_group_id = group.get("id")
-            break
-
-    for group in data["category_groups"]:
-        if (
-            group.get("hidden", False)
-            or group.get("id") == internal_master_category_group_id
-        ):
-            continue
-        group_name = group["name"]
-        for category in group["categories"]:
-            if (
-                not category.get("hidden", False)
-                and not category.get("deleted", False)
-                and category.get("name") != "Inflow: Ready to Assign"
-            ):
-                cat_id = category["id"]
-                cat_name = category["name"]
-                display_name = f"{group_name}: {cat_name}"
-                category_list_for_completer.append((display_name, cat_id))
-                name_to_id_lookup[display_name.lower()] = cat_id
-                id_to_name_lookup[cat_id] = display_name
-    category_list_for_completer.sort(key=lambda x: x[0])
-    return category_list_for_completer, name_to_id_lookup, id_to_name_lookup
+# NOTE: get_categories moved to ynab_client.py
 
 
 class CategoryCompleter(Completer):
@@ -513,61 +390,28 @@ def prompt_for_category_selection(category_completer, name_to_id_map):
 
 def main():
     """Main CLI function."""
-    # Get API credentials from environment variables or config file
-    YNAB_API_KEY = os.getenv("YNAB_API_KEY")
-    YNAB_BUDGET_ID = os.getenv("YNAB_BUDGET_ID")
-    YNAB_ACCOUNT_ID = os.getenv(
-        "YNAB_ACCOUNT_ID"
-    )  # Optional: specific account ID or None for all accounts
-
-    # If environment variables aren't set, try loading from config file
-    if not YNAB_API_KEY or not YNAB_BUDGET_ID:
-        config_file = ".env"
-        if os.path.exists(config_file):
-            print(f"Loading configuration from {config_file}")
-            with open(config_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("YNAB_API_KEY="):
-                        YNAB_API_KEY = line.split("=", 1)[1]
-                    elif line.startswith("YNAB_BUDGET_ID="):
-                        YNAB_BUDGET_ID = line.split("=", 1)[1]
-                    elif line.startswith("YNAB_ACCOUNT_ID="):
-                        account_id_value = line.split("=", 1)[1]
-                        YNAB_ACCOUNT_ID = (
-                            account_id_value
-                            if account_id_value.lower() != "none"
-                            else None
-                        )
-
-    # Validate required configuration
-    if not YNAB_API_KEY:
-        print("ERROR: YNAB_API_KEY not found!")
-        print("Please set it as an environment variable or create a .env file.")
+    # Load configuration using extracted Config class
+    try:
+        config = Config.from_env()
+        print("✓ Configuration loaded successfully")
+        print(f"✓ API Key: {config.api_key[:8]}...")
+        print(f"✓ Budget ID: {config.budget_id[:8]}...")
+        print(
+            f"✓ Account ID: {config.account_id[:8]}..."
+            if config.account_id
+            else "✓ All accounts"
+        )
+    except Exception as e:
+        print(f"ERROR: {e}")
+        print("Please set environment variables or create a .env file.")
         print("See README.md for setup instructions.")
         exit(1)
 
-    if not YNAB_BUDGET_ID:
-        print("ERROR: YNAB_BUDGET_ID not found!")
-        print("Please set it as an environment variable or create a .env file.")
-        print("See README.md for setup instructions.")
-        exit(1)
-
-    print("✓ Configuration loaded successfully")
-    print(f"✓ API Key: {YNAB_API_KEY[:8]}..." if YNAB_API_KEY else "✗ No API Key")
-    print(
-        f"✓ Budget ID: {YNAB_BUDGET_ID[:8]}..." if YNAB_BUDGET_ID else "✗ No Budget ID"
-    )
-    print(
-        f"✓ Account ID: {YNAB_ACCOUNT_ID[:8]}..."
-        if YNAB_ACCOUNT_ID
-        else "✓ All accounts"
-    )
+    # Initialize YNAB client
+    ynab_client = YNABClient(config.api_key, config.budget_id)
 
     print("Fetching categories...")
-    categories_list, category_name_map, category_id_map = get_categories(
-        YNAB_BUDGET_ID, YNAB_API_KEY
-    )
+    categories_list, category_name_map, category_id_map = ynab_client.get_categories()
 
     if not categories_list:
         print("Exiting due to category fetch error or no usable categories found.")
@@ -600,7 +444,7 @@ def main():
             print(f"✓ Parsed {len(parsed_orders)} orders from Amazon data")
             for order in parsed_orders[:3]:  # Show first 3
                 print(
-                    f"  - Order {order['order_id']}: ${order.get('total', 'N/A')} ({len(order.get('items', []))} items)"
+                    f"  - Order {order.order_id}: ${getattr(order, 'total', 'N/A')} ({len(getattr(order, 'items', []))} items)"
                 )
             if len(parsed_orders) > 3:
                 print(f"  ... and {len(parsed_orders) - 3} more orders")
@@ -609,12 +453,12 @@ def main():
 
     print("\nFetching transactions...")
     # (Transaction fetching and filtering logic remains the same as v3)
-    transactions_endpoint = f"/budgets/{YNAB_BUDGET_ID}/transactions"
-    if YNAB_ACCOUNT_ID:
+    transactions_endpoint = f"/budgets/{config.budget_id}/transactions"
+    if config.account_id and config.account_id.lower() != "none":
         transactions_endpoint = (
-            f"/budgets/{YNAB_BUDGET_ID}/accounts/{YNAB_ACCOUNT_ID}/transactions"
+            f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
         )
-    transactions_data = get_ynab_data(transactions_endpoint, YNAB_API_KEY)
+    transactions_data = ynab_client.get_data(transactions_endpoint)
     if transactions_data is None or "transactions" not in transactions_data:
         exit()
     transactions = transactions_data["transactions"]
@@ -673,18 +517,25 @@ def main():
         # Try to find matching order from parsed data and show it
         matching_order = None
         if parsed_orders:
-            matching_order = find_matching_order(amount_float, date, parsed_orders)
+            # Use extracted transaction matcher
+            transaction_matcher = TransactionMatcher()
+            matching_order = transaction_matcher.find_matching_order(
+                amount_float, date, parsed_orders
+            )
             if matching_order:
                 print("\n  🎯 MATCHED ORDER FOUND:")
-                print(f"     Order ID: {matching_order['order_id']}")
-                print(f"     Total: ${matching_order.get('total', 'N/A')}")
-                print(f"     Date: {matching_order.get('date', 'N/A')}")
-                print(
-                    f"     Order Link: {generate_amazon_order_link(matching_order['order_id'])}"
+                print(f"     Order ID: {matching_order.order_id}")
+                print(f"     Total: ${getattr(matching_order, 'total', 'N/A')}")
+                print(f"     Date: {getattr(matching_order, 'date_str', 'N/A')}")
+                # Use extracted memo generator for order link
+                memo_generator = MemoGenerator()
+                order_link = memo_generator.generate_amazon_order_link(
+                    matching_order.order_id
                 )
-                if matching_order.get("items"):
+                print(f"     Order Link: {order_link}")
+                if hasattr(matching_order, "items") and matching_order.items:
                     print("     Items:")
-                    for item in matching_order["items"]:
+                    for item in matching_order.items:
                         print(f"       - {item}")
                 print()
             else:
@@ -709,8 +560,9 @@ def main():
                 # Check if there are multiple items and suggest splitting
                 if (
                     matching_order
-                    and matching_order.get("items")
-                    and len(matching_order["items"]) > 1
+                    and hasattr(matching_order, "items")
+                    and matching_order.items
+                    and len(matching_order.items) > 1
                 ):
                     print("There is more than one item in this transaction.")
 
@@ -734,10 +586,10 @@ def main():
                     if matching_order:
                         print("Using matched order data for memo generation...")
                         item_details = {
-                            "order_id": matching_order["order_id"],
-                            "items": matching_order.get("items", []),
-                            "total": matching_order.get("total"),
-                            "date": matching_order.get("date"),
+                            "order_id": matching_order.order_id,
+                            "items": getattr(matching_order, "items", []),
+                            "total": getattr(matching_order, "total", None),
+                            "date": getattr(matching_order, "date_str", None),
                         }
                     else:
                         # Ask if user wants to enter item details manually
@@ -757,7 +609,9 @@ def main():
                                 if item_details["items"]
                                 else "Amazon Purchase"
                             )
-                            order_link = generate_amazon_order_link(
+                            # Use extracted memo generator
+                            memo_generator = MemoGenerator()
+                            order_link = memo_generator.generate_amazon_order_link(
                                 item_details["order_id"]
                             )
                             enhanced_memo = (
@@ -766,8 +620,9 @@ def main():
                                 else items_text
                             )
                         else:
-                            # Manual item details
-                            enhanced_memo = generate_enhanced_memo(
+                            # Manual item details - use extracted memo generator
+                            memo_generator = MemoGenerator()
+                            enhanced_memo = memo_generator.generate_enhanced_memo(
                                 original_memo, None, item_details
                             )
                     else:
@@ -830,8 +685,12 @@ def main():
                         )
 
                         # Show which item this split is for if we have matched order data
-                        if matching_order and matching_order.get("items"):
-                            items = matching_order["items"]
+                        if (
+                            matching_order
+                            and hasattr(matching_order, "items")
+                            and matching_order.items
+                        ):
+                            items = matching_order.items
                             if split_count <= len(items):
                                 print(f"Item {split_count}: {items[split_count - 1]}")
                             else:
@@ -897,12 +756,14 @@ def main():
                         # Use the already matched order if available
                         if matching_order:
                             print("Using matched order data for split memo...")
-                            items = matching_order.get("items", [])
+                            items = getattr(matching_order, "items", [])
                             if split_count <= len(items):
                                 # Use the specific item for this split
                                 items_text = items[split_count - 1]
-                                order_link = generate_amazon_order_link(
-                                    matching_order["order_id"]
+                                # Use extracted memo generator
+                                memo_generator = MemoGenerator()
+                                order_link = memo_generator.generate_amazon_order_link(
+                                    matching_order.order_id
                                 )
                                 suggested_split_memo = (
                                     f"{items_text}\n {order_link}"
@@ -920,8 +781,12 @@ def main():
                             if manual_entry == "y":
                                 item_details = prompt_for_item_details()
                                 if item_details:
-                                    suggested_split_memo = generate_enhanced_memo(
-                                        "", None, item_details
+                                    # Use extracted memo generator
+                                    memo_generator = MemoGenerator()
+                                    suggested_split_memo = (
+                                        memo_generator.generate_enhanced_memo(
+                                            "", None, item_details
+                                        )
                                     )
 
                         # Present the memo suggestion
