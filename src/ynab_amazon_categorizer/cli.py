@@ -31,118 +31,6 @@ YNAB_API_URL = "https://api.ynab.com/v1"
 
 
 # NOTE: Amazon order parsing has been moved to amazon_parser.py
-def parse_amazon_orders_page_REMOVED():
-    """Parse Amazon orders page text to extract order information"""
-    orders = []
-
-    # Find all order blocks using regex
-    order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$(\d+\.?\d*)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
-    order_matches = re.finditer(order_pattern, orders_text, re.DOTALL | re.IGNORECASE)
-
-    for match in order_matches:
-        order_date = match.group(1).strip()
-        order_total = float(match.group(2))
-        order_id = match.group(3)
-
-        # Find the content after this order until the next order or end
-        start_pos = match.end()
-        next_order = re.search(r"Order placed", orders_text[start_pos:], re.IGNORECASE)
-        if next_order:
-            end_pos = start_pos + next_order.start()
-            order_content = orders_text[start_pos:end_pos]
-        else:
-            order_content = orders_text[
-                start_pos : start_pos + 2000
-            ]  # Take next 2000 chars
-
-        # Extract items from the order content
-        items = []
-        lines = order_content.split("\n")
-
-        for line in lines:
-            line = line.strip()
-            if not line or len(line) < 20:
-                continue
-
-            # Skip common UI elements
-            skip_patterns = [
-                r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
-                r"^(Delivered|Arriving|Auto-delivered|Package was)",
-                r"^(Return items:|Return or replace)",
-                r"^\d+\.?\d* out of \d+ stars",
-                r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
-                r"^\$\d+\.\d+|\(\$\d+\.\d+",
-                r"^\d+ sustainability features?$",
-                r"^[A-Z\s]{10,}$",  # All caps lines
-                r"^(Ship to|Order #|View order|Invoice)",
-            ]
-
-            if any(re.match(pattern, line, re.IGNORECASE) for pattern in skip_patterns):
-                continue
-
-            # Look for product names - they usually contain specific patterns
-            if (
-                any(
-                    word in line.lower()
-                    for word in [
-                        "pack",
-                        "count",
-                        "size",
-                        "oz",
-                        "ml",
-                        "lbs",
-                        "kg",
-                        "inch",
-                        "cm",
-                    ]
-                )
-                or re.search(
-                    r"[A-Z][a-z].*[A-Z]", line
-                )  # Mixed case indicating product names
-                or len(line.split()) >= 5
-            ):  # Long descriptive lines
-                # Clean up the line
-                cleaned_line = re.sub(r"\s+", " ", line)
-                cleaned_line = re.sub(
-                    r"^[-•]\s*", "", cleaned_line
-                )  # Remove bullet points
-
-                # Skip if it looks like navigation or common elements
-                skip_words = [
-                    "account",
-                    "orders",
-                    "cart",
-                    "search",
-                    "hello",
-                    "browse",
-                    "amazon",
-                    "prime",
-                    "shipping",
-                ]
-                if not any(word in cleaned_line.lower() for word in skip_words):
-                    items.append(cleaned_line)
-
-        # Remove duplicates and limit items
-        seen = set()
-        unique_items = []
-        for item in items:
-            if item not in seen and len(item) > 15:  # Only keep substantial items
-                seen.add(item)
-                unique_items.append(item)
-                if len(unique_items) >= 3:  # Limit to 3 items
-                    break
-
-        if unique_items:  # Only add orders that have identifiable items
-            orders.append(
-                {
-                    "order_id": order_id,
-                    "total": order_total,
-                    "date": order_date,
-                    "items": unique_items,
-                }
-            )
-
-    return orders
 
 
 def prompt_for_amazon_orders_data():
@@ -180,56 +68,7 @@ def prompt_for_amazon_orders_data():
     return parsed_orders
 
 
-def find_matching_order(transaction_amount, transaction_date, parsed_orders):
-    """Find the best matching order for a transaction"""
-    if not parsed_orders:
-        return None
-
-    transaction_amount_abs = abs(transaction_amount)
-
-    # Convert transaction date to comparable format
-    try:
-        trans_date = datetime.strptime(transaction_date, "%Y-%m-%d")
-    except:
-        trans_date = None
-
-    best_match = None
-    best_score = 0
-
-    for order in parsed_orders:
-        score = 0
-
-        # Check amount match (most important)
-        if hasattr(order, "total") and order.total:
-            amount_diff = abs(order.total - transaction_amount_abs)
-            if amount_diff < 0.01:  # Exact match
-                score += 100
-            elif amount_diff < 1.00:  # Close match
-                score += 50
-            elif amount_diff < 5.00:  # Reasonable match
-                score += 20
-
-        # Check date proximity
-        if trans_date and hasattr(order, "date_str") and order.date_str:
-            try:
-                # Parse order date (format like "July 31, 2025")
-                order_date = datetime.strptime(order.date_str, "%B %d, %Y")
-                date_diff = abs((trans_date - order_date).days)
-                if date_diff <= 1:  # Same or next day
-                    score += 30
-                elif date_diff <= 3:  # Within 3 days
-                    score += 15
-                elif date_diff <= 7:  # Within a week
-                    score += 5
-            except:
-                pass
-
-        if score > best_score:
-            best_score = score
-            best_match = order
-
-    # Only return match if score is reasonable
-    return best_match if best_score >= 20 else None
+# NOTE: find_matching_order moved to transaction_matcher.py
 
 
 def get_multiline_input_with_custom_submit(prompt_message="Enter multiline text: "):
@@ -891,11 +730,9 @@ def main():
                     if not confirm:
                         confirm = "y"
                     if confirm == "y":
-                        if update_ynab_transaction(
+                        if ynab_client.update_transaction(
                             transaction_id,
-                            updated_payload_dict,
-                            YNAB_API_KEY,
-                            YNAB_BUDGET_ID,
+                            updated_payload_dict
                         ):
                             print("Update successful.")
                             break  # Exit action loop, go to next transaction

@@ -1,6 +1,41 @@
 {
   "testModules": [
     {
+      "moduleId": "tests/test_amazon_parser.py",
+      "tests": [
+        {
+          "name": "test_parse_simple_order",
+          "fullName": "tests/test_amazon_parser.py::test_parse_simple_order",
+          "state": "passed"
+        },
+        {
+          "name": "test_parse_empty_order_text",
+          "fullName": "tests/test_amazon_parser.py::test_parse_empty_order_text",
+          "state": "passed"
+        },
+        {
+          "name": "test_extract_items_from_order_content",
+          "fullName": "tests/test_amazon_parser.py::test_extract_items_from_order_content",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/test_amazon_parser_real.py",
+      "tests": [
+        {
+          "name": "test_parse_actual_amazon_order_format",
+          "fullName": "tests/test_amazon_parser_real.py::test_parse_actual_amazon_order_format",
+          "state": "passed"
+        },
+        {
+          "name": "test_parse_different_order",
+          "fullName": "tests/test_amazon_parser_real.py::test_parse_different_order",
+          "state": "passed"
+        }
+      ]
+    },
+    {
       "moduleId": "tests/test_config.py",
       "tests": [
         {
@@ -11,6 +46,96 @@
         {
           "name": "test_config_missing_env_vars",
           "fullName": "tests/test_config.py::test_config_missing_env_vars",
+          "state": "failed",
+          "errors": [
+            {
+              "message": "def test_config_missing_env_vars():\n        \"\"\"Test config raises error when required env vars are missing.\"\"\"\n        import pytest\n    \n        from ynab_amazon_categorizer.exceptions import ConfigurationError\n    \n>       with pytest.raises(ConfigurationError):\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       Failed: DID NOT RAISE <class 'ynab_amazon_categorizer.exceptions.ConfigurationError'>\n\ntests\\test_config.py:23: Failed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/test_memo_generator.py",
+      "tests": [
+        {
+          "name": "test_memo_generator_initialization",
+          "fullName": "tests/test_memo_generator.py::test_memo_generator_initialization",
+          "state": "passed"
+        },
+        {
+          "name": "test_generate_amazon_order_link",
+          "fullName": "tests/test_memo_generator.py::test_generate_amazon_order_link",
+          "state": "passed"
+        },
+        {
+          "name": "test_generate_amazon_order_link_empty",
+          "fullName": "tests/test_memo_generator.py::test_generate_amazon_order_link_empty",
+          "state": "passed"
+        },
+        {
+          "name": "test_generate_enhanced_memo_basic",
+          "fullName": "tests/test_memo_generator.py::test_generate_enhanced_memo_basic",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/test_transaction_matcher.py",
+      "tests": [
+        {
+          "name": "test_transaction_matcher_initialization",
+          "fullName": "tests/test_transaction_matcher.py::test_transaction_matcher_initialization",
+          "state": "passed"
+        },
+        {
+          "name": "test_find_matching_order_exact_amount_match",
+          "fullName": "tests/test_transaction_matcher.py::test_find_matching_order_exact_amount_match",
+          "state": "passed"
+        },
+        {
+          "name": "test_find_matching_order_no_match",
+          "fullName": "tests/test_transaction_matcher.py::test_find_matching_order_no_match",
+          "state": "passed"
+        },
+        {
+          "name": "test_find_matching_order_close_amount_match",
+          "fullName": "tests/test_transaction_matcher.py::test_find_matching_order_close_amount_match",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "tests/test_ynab_client.py",
+      "tests": [
+        {
+          "name": "test_ynab_client_initialization",
+          "fullName": "tests/test_ynab_client.py::test_ynab_client_initialization",
+          "state": "passed"
+        },
+        {
+          "name": "test_get_data_success",
+          "fullName": "tests/test_ynab_client.py::test_get_data_success",
+          "state": "passed"
+        },
+        {
+          "name": "test_get_data_request_error",
+          "fullName": "tests/test_ynab_client.py::test_get_data_request_error",
+          "state": "passed"
+        },
+        {
+          "name": "test_update_transaction_success",
+          "fullName": "tests/test_ynab_client.py::test_update_transaction_success",
+          "state": "passed"
+        },
+        {
+          "name": "test_update_transaction_error",
+          "fullName": "tests/test_ynab_client.py::test_update_transaction_error",
+          "state": "passed"
+        },
+        {
+          "name": "test_get_categories_calls_get_data",
+          "fullName": "tests/test_ynab_client.py::test_get_categories_calls_get_data",
           "state": "passed"
         }
       ]

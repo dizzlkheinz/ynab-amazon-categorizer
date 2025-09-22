@@ -48,3 +48,4 @@ Thumbs.db
 RELEASE_NOTES.md
 temp_release.json
 release/
+.claude/
