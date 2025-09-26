@@ -1,5 +1,8 @@
 """Transaction matching functionality."""
+
 from datetime import datetime
+from typing import Any, Optional, Union, Sequence
+from .amazon_parser import Order
 
 
 class TransactionMatcher:
@@ -8,7 +11,7 @@ class TransactionMatcher:
     def __init__(self) -> None:
         pass
 
-    def find_matching_order(self, transaction_amount, transaction_date, parsed_orders):
+    def find_matching_order(self, transaction_amount: float, transaction_date: str, parsed_orders: Sequence[Union[Order, dict[str, Any]]]) -> Optional[Union[Order, dict[str, Any]]]:
         """Find the best matching order for a transaction using sophisticated scoring"""
         if not parsed_orders:
             return None
@@ -18,7 +21,7 @@ class TransactionMatcher:
         # Convert transaction date to comparable format
         try:
             trans_date = datetime.strptime(transaction_date, "%Y-%m-%d")
-        except:
+        except Exception:
             trans_date = None
 
         best_match = None
@@ -61,7 +64,7 @@ class TransactionMatcher:
                         score += 15
                     elif date_diff <= 7:  # Within a week
                         score += 5
-                except:
+                except Exception:
                     pass
 
             if score > best_score:

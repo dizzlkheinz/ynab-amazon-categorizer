@@ -1,20 +1,23 @@
 """Amazon order parsing functionality."""
+
 import re
+from typing import Optional, Any
 
 
 class Order:
     """Represents a parsed Amazon order."""
-    def __init__(self):
-        self.order_id = None
-        self.total = None
-        self.date_str = None
-        self.items = []
+
+    def __init__(self) -> None:
+        self.order_id: Optional[str] = None
+        self.total: Optional[float] = None
+        self.date_str: Optional[str] = None
+        self.items: list[str] = []
 
 
 class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
-    def parse_orders_page(self, orders_text: str) -> list:
+    def parse_orders_page(self, orders_text: str) -> list[Order]:
         """Parse Amazon orders page text to extract order information"""
         if not orders_text.strip():
             return []
@@ -23,7 +26,9 @@ class AmazonParser:
 
         # Find all order blocks using regex
         order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$(\d+\.?\d*)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
-        order_matches = re.finditer(order_pattern, orders_text, re.DOTALL | re.IGNORECASE)
+        order_matches = re.finditer(
+            order_pattern, orders_text, re.DOTALL | re.IGNORECASE
+        )
 
         for match in order_matches:
             order_date = match.group(1).strip()
@@ -32,7 +37,9 @@ class AmazonParser:
 
             # Find the content after this order until the next order or end
             start_pos = match.end()
-            next_order = re.search(r"Order placed", orders_text[start_pos:], re.IGNORECASE)
+            next_order = re.search(
+                r"Order placed", orders_text[start_pos:], re.IGNORECASE
+            )
             if next_order:
                 end_pos = start_pos + next_order.start()
                 order_content = orders_text[start_pos:end_pos]
@@ -54,7 +61,7 @@ class AmazonParser:
 
         return orders
 
-    def extract_items_from_content(self, order_content):
+    def extract_items_from_content(self, order_content: str) -> list[str]:
         """Extract item names from order content."""
         items = []
         lines = order_content.split("\n")

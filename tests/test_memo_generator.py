@@ -3,13 +3,13 @@
 from ynab_amazon_categorizer.memo_generator import MemoGenerator
 
 
-def test_memo_generator_initialization():
+def test_memo_generator_initialization() -> None:
     """Test MemoGenerator can be initialized."""
     generator = MemoGenerator()
     assert generator is not None
 
 
-def test_generate_amazon_order_link():
+def test_generate_amazon_order_link() -> None:
     """Test Amazon order link generation."""
     generator = MemoGenerator()
 
@@ -21,7 +21,7 @@ def test_generate_amazon_order_link():
     assert result == expected_link
 
 
-def test_generate_amazon_order_link_empty():
+def test_generate_amazon_order_link_empty() -> None:
     """Test Amazon order link generation with empty order ID."""
     generator = MemoGenerator()
 
@@ -32,7 +32,7 @@ def test_generate_amazon_order_link_empty():
     assert result is None
 
 
-def test_generate_enhanced_memo_basic():
+def test_generate_enhanced_memo_basic() -> None:
     """Test basic enhanced memo generation."""
     generator = MemoGenerator()
 

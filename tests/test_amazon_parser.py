@@ -3,7 +3,7 @@
 from ynab_amazon_categorizer.amazon_parser import AmazonParser
 
 
-def test_parse_simple_order():
+def test_parse_simple_order() -> None:
     """Test parsing a simple Amazon order."""
     order_text = """
     Order placed July 31, 2024
@@ -24,14 +24,14 @@ def test_parse_simple_order():
     assert "Fancy Feast" in order.items[0]
 
 
-def test_parse_empty_order_text():
+def test_parse_empty_order_text() -> None:
     """Test parsing empty order text returns empty list."""
     parser = AmazonParser()
     orders = parser.parse_orders_page("")
     assert len(orders) == 0
 
 
-def test_extract_items_from_order_content():
+def test_extract_items_from_order_content() -> None:
     """Test extracting items from Amazon order content."""
     parser = AmazonParser()
 

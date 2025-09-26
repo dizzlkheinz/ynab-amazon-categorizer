@@ -4,7 +4,7 @@ try:
     from importlib.metadata import PackageNotFoundError, version
 except ImportError:
     # Python < 3.8
-    from importlib_metadata import PackageNotFoundError, version
+    from importlib_metadata import PackageNotFoundError, version  # type: ignore[no-redef]
 
 try:
     __version__ = version("ynab-amazon-categorizer")

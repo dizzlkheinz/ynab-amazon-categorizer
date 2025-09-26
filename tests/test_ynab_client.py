@@ -2,12 +2,12 @@
 
 from unittest.mock import Mock, patch
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from ynab_amazon_categorizer.ynab_client import YNABClient
 
 
-def test_ynab_client_initialization():
+def test_ynab_client_initialization() -> None:
     """Test YNAB client can be initialized with API key and budget ID."""
     client = YNABClient("test_api_key", "test_budget_id")
     assert client.api_key == "test_api_key"
@@ -15,7 +15,7 @@ def test_ynab_client_initialization():
 
 
 @patch("ynab_amazon_categorizer.ynab_client.requests.get")
-def test_get_data_success(mock_get):
+def test_get_data_success(mock_get: Mock) -> None:
     """Test successful YNAB API data retrieval."""
     # Arrange
     mock_response = Mock()
@@ -37,7 +37,7 @@ def test_get_data_success(mock_get):
 
 
 @patch("ynab_amazon_categorizer.ynab_client.requests.get")
-def test_get_data_request_error(mock_get):
+def test_get_data_request_error(mock_get: Mock) -> None:
     """Test YNAB API request error handling."""
     # Arrange
     mock_get.side_effect = requests.exceptions.RequestException("Network error")
@@ -51,7 +51,7 @@ def test_get_data_request_error(mock_get):
 
 
 @patch("ynab_amazon_categorizer.ynab_client.requests.put")
-def test_update_transaction_success(mock_put):
+def test_update_transaction_success(mock_put: Mock) -> None:
     """Test successful transaction update."""
     # Arrange
     mock_response = Mock()
@@ -77,7 +77,7 @@ def test_update_transaction_success(mock_put):
 
 
 @patch("ynab_amazon_categorizer.ynab_client.requests.put")
-def test_update_transaction_error(mock_put):
+def test_update_transaction_error(mock_put: Mock) -> None:
     """Test transaction update error handling."""
     # Arrange
     mock_put.side_effect = requests.exceptions.RequestException("Update failed")
@@ -90,13 +90,13 @@ def test_update_transaction_error(mock_put):
     assert result is False
 
 
-def test_get_categories_calls_get_data():
+def test_get_categories_calls_get_data() -> None:
     """Test that get_categories properly calls get_data method."""
     # Arrange
     client = YNABClient("test_key", "test_budget")
 
     # Mock the get_data method to return categories data
-    client.get_data = Mock(
+    mock_get_data = Mock(
         return_value={
             "category_groups": [
                 {
@@ -115,6 +115,7 @@ def test_get_categories_calls_get_data():
             ]
         }
     )
+    client.get_data = mock_get_data  # type: ignore[method-assign]
 
     # Act
     categories, name_to_id, id_to_name = client.get_categories()

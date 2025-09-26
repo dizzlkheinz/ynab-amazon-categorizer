@@ -3,16 +3,16 @@
 from ynab_amazon_categorizer.amazon_parser import AmazonParser
 
 
-def test_parse_actual_amazon_order_format():
+def test_parse_actual_amazon_order_format() -> None:
     """Test parsing an actual Amazon order format."""
     order_text = """
     Order placed July 31, 2024
     Total $57.57
     Order # 702-8237239-1234567
-    
+
     Fancy Feast Grilled Wet Cat Food, Tuna Feast - 85 g Can (24 Pack)
     $25.99
-    
+
     USB-C Cable, 6ft Fast Charging Cable
     $31.58
     """
@@ -29,13 +29,13 @@ def test_parse_actual_amazon_order_format():
     assert "Fancy Feast" in str(order.items)
 
 
-def test_parse_different_order():
+def test_parse_different_order() -> None:
     """Test parsing a different order to force real parsing."""
     order_text = """
     Order placed August 15, 2024
     Total $89.99
     Order # 702-1234567-9876543
-    
+
     Wireless Bluetooth Headphones - Over-Ear Noise Cancelling
     """
 

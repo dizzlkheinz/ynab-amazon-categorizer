@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 
 from .exceptions import ConfigurationError
 
@@ -16,13 +17,13 @@ except ImportError:
 class Config:
     """Configuration class for YNAB Amazon Categorizer."""
 
-    def __init__(self, api_key: str, budget_id: str, account_id: str = None):
+    def __init__(self, api_key: str, budget_id: str, account_id: Optional[str] = None):
         self.api_key = api_key
         self.budget_id = budget_id
         self.account_id = account_id
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls) -> "Config":
         # Load .env file if available
         if DOTENV_AVAILABLE:
             # Look for .env file in current directory and parent directories

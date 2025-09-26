@@ -1,6 +1,7 @@
 """YNAB API client functionality."""
 
-import requests
+from typing import Any, Optional, Union
+import requests  # type: ignore[import-untyped]
 
 
 class YNABClient:
@@ -10,7 +11,7 @@ class YNABClient:
         self.api_key = api_key
         self.budget_id = budget_id
 
-    def get_data(self, endpoint):
+    def get_data(self, endpoint: str) -> Optional[dict[str, Any]]:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
         try:
@@ -20,7 +21,7 @@ class YNABClient:
         except requests.exceptions.RequestException:
             return None
 
-    def update_transaction(self, transaction_id, payload):
+    def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> bool:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -33,7 +34,7 @@ class YNABClient:
         except requests.exceptions.RequestException:
             return False
 
-    def get_categories(self):
+    def get_categories(self) -> tuple[list[tuple[str, str]], dict[str, str], dict[str, str]]:
         data = self.get_data(f"/budgets/{self.budget_id}/categories")
 
         if not data or "category_groups" not in data:

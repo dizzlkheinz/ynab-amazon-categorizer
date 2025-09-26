@@ -1,15 +1,16 @@
 """Tests for transaction matching functionality."""
 
 from ynab_amazon_categorizer.transaction_matcher import TransactionMatcher
+from ynab_amazon_categorizer.amazon_parser import Order
 
 
-def test_transaction_matcher_initialization():
+def test_transaction_matcher_initialization() -> None:
     """Test transaction matcher can be initialized."""
     matcher = TransactionMatcher()
     assert matcher is not None
 
 
-def test_find_matching_order_exact_amount_match():
+def test_find_matching_order_exact_amount_match() -> None:
     """Test finding order with exact amount match."""
     matcher = TransactionMatcher()
 
@@ -32,11 +33,15 @@ def test_find_matching_order_exact_amount_match():
 
     # Assert
     assert result is not None
-    assert result["order_id"] == "702-8237239-1234567"
-    assert result["total"] == 57.57
+    if isinstance(result, dict):
+        assert result["order_id"] == "702-8237239-1234567"
+        assert result["total"] == 57.57
+    else:
+        assert result.order_id == "702-8237239-1234567"
+        assert result.total == 57.57
 
 
-def test_find_matching_order_no_match():
+def test_find_matching_order_no_match() -> None:
     """Test finding order when no orders match criteria."""
     matcher = TransactionMatcher()
 
@@ -61,7 +66,7 @@ def test_find_matching_order_no_match():
     assert result is None
 
 
-def test_find_matching_order_close_amount_match():
+def test_find_matching_order_close_amount_match() -> None:
     """Test finding order with close amount match (within $1 tolerance)."""
     matcher = TransactionMatcher()
 
@@ -73,13 +78,18 @@ def test_find_matching_order_close_amount_match():
             "order_id": "702-8237239-1234567",
             "total": 57.57,
             "date": "July 31, 2024",
-            "items": ["Test Item"]
+            "items": ["Test Item"],
         }
     ]
 
     # Act
-    result = matcher.find_matching_order(transaction_amount, transaction_date, parsed_orders)
+    result = matcher.find_matching_order(
+        transaction_amount, transaction_date, parsed_orders
+    )
 
     # Assert
     assert result is not None
-    assert result["order_id"] == "702-8237239-1234567"
+    if isinstance(result, dict):
+        assert result["order_id"] == "702-8237239-1234567"
+    else:
+        assert result.order_id == "702-8237239-1234567"

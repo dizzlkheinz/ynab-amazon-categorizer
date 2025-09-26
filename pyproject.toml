@@ -7,7 +7,7 @@ name = "ynab-amazon-categorizer"
 dynamic = ["version"]
 description = "Automatically categorize Amazon transactions in YNAB with rich item information"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = {text = "GPL-3.0"}
 authors = [
     {name = "dizzlkheinz"},
@@ -20,12 +20,11 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Accounting",
     "Topic :: Utilities",
 ]
@@ -95,11 +94,11 @@ exclude_lines = [
 
 [tool.black]
 line-length = 88
-target-version = ["py37"]
+target-version = ["py39"]
 include = '\\.pyi?$'
 
 [tool.ruff]
-target-version = "py37"
+target-version = "py39"
 line-length = 88
 select = [
     "E",  # pycodestyle errors
@@ -117,7 +116,7 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.7"
+python_version = "3.11"
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_incomplete_defs = true
@@ -125,4 +124,6 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+ignore_missing_imports = true
+allow_redefinition = true
 
