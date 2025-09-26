@@ -1,6 +1,6 @@
 # YNAB Amazon Categorizer
 
-An enhanced Python package that automatically categorizes Amazon transactions in YNAB (You Need A Budget) with rich item information and automatic memo generation.
+A Python package that assists in categorizing Amazon transactions in YNAB (You Need A Budget) with rich item information, automatic memo generation, and tab-completion for categories.
 
 ## Features
 

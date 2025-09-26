@@ -22,14 +22,45 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e .
+        pip install -e .[dev]
     
-    - name: Test package can be imported and run
+    - name: Run tests
+      run: pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
       run: |
-        python -c "from ynab_amazon_categorizer.cli import main; print('Package imports successfully')"
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+    - name: Run type checker
+      run: mypy .
 
   publish:
-    needs: test
+    needs: [test, lint, type-check]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -61,7 +92,7 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
 
   create-release:
-    needs: [test, publish]
+    needs: [publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write

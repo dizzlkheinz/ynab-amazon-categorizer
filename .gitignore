@@ -49,3 +49,6 @@ RELEASE_NOTES.md
 temp_release.json
 release/
 .claude/
+
+# Backups
+ynab_amazon_categorizer.py.backup
