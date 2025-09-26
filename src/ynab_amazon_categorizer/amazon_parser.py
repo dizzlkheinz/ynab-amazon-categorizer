@@ -1,7 +1,7 @@
 """Amazon order parsing functionality."""
 
 import re
-from typing import Optional, Any
+from typing import Optional
 
 
 class Order:

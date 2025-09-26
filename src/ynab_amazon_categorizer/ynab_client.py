@@ -1,6 +1,7 @@
 """YNAB API client functionality."""
 
-from typing import Any, Optional, Union
+from typing import Any, Optional
+
 import requests  # type: ignore[import-untyped]
 
 
@@ -34,7 +35,9 @@ class YNABClient:
         except requests.exceptions.RequestException:
             return False
 
-    def get_categories(self) -> tuple[list[tuple[str, str]], dict[str, str], dict[str, str]]:
+    def get_categories(
+        self,
+    ) -> tuple[list[tuple[str, str]], dict[str, str], dict[str, str]]:
         data = self.get_data(f"/budgets/{self.budget_id}/categories")
 
         if not data or "category_groups" not in data:

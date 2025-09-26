@@ -1,7 +1,6 @@
 """Tests for transaction matching functionality."""
 
 from ynab_amazon_categorizer.transaction_matcher import TransactionMatcher
-from ynab_amazon_categorizer.amazon_parser import Order
 
 
 def test_transaction_matcher_initialization() -> None:

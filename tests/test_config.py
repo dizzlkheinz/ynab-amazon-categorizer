@@ -1,6 +1,7 @@
 """Tests for configuration management."""
 
 import pytest
+
 from ynab_amazon_categorizer.config import Config
 
 

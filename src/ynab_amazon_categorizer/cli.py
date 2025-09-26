@@ -1,13 +1,16 @@
 import json
 import os  # For history file path
+from collections.abc import Iterable
+from typing import Optional, Union
 
 # --- NEW: Import prompt_toolkit components ---
 from prompt_toolkit import prompt
-from prompt_toolkit.completion import Completer, Completion, CompleteEvent
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
-from .amazon_parser import AmazonParser
+from .amazon_parser import AmazonParser, Order
 
 # --- END NEW ---
 # --- Import extracted modules ---
@@ -15,11 +18,6 @@ from .config import Config
 from .memo_generator import MemoGenerator
 from .transaction_matcher import TransactionMatcher
 from .ynab_client import YNABClient
-from typing import Dict, Iterable, List, Optional, Tuple, Union
-
-from prompt_toolkit.document import Document
-
-from .amazon_parser import Order
 
 # --- CONFIGURATION ---
 
@@ -36,7 +34,7 @@ YNAB_API_URL = "https://api.ynab.com/v1"
 # NOTE: Amazon order parsing has been moved to amazon_parser.py
 
 
-def prompt_for_amazon_orders_data() -> Optional[List[Order]]:
+def prompt_for_amazon_orders_data() -> Optional[list[Order]]:
     """Prompt user to paste Amazon orders page data"""
     print("\n--- Amazon Orders Data Entry ---")
     print("You can copy and paste the content from your Amazon orders page.")
@@ -74,7 +72,9 @@ def prompt_for_amazon_orders_data() -> Optional[List[Order]]:
 # NOTE: find_matching_order moved to transaction_matcher.py
 
 
-def get_multiline_input_with_custom_submit(prompt_message: str = "Enter multiline text: ") -> Optional[str]:
+def get_multiline_input_with_custom_submit(
+    prompt_message: str = "Enter multiline text: ",
+) -> Optional[str]:
     """Get multiline input with Ctrl+J to submit"""
     kb = KeyBindings()
 
@@ -119,11 +119,13 @@ def generate_split_summary_memo(matching_order: Order) -> str:
     return summary
 
 
-def prompt_for_item_details() -> Optional[Dict[str, Union[str, int, float, List[str], None]]]:
+def prompt_for_item_details() -> Optional[
+    dict[str, Union[str, int, float, list[str], None]]
+]:
     """Prompt user to enter item details manually"""
     print("\n--- Manual Item Details Entry ---")
 
-    item_details: Dict[str, Union[str, int, float, List[str], None]] = {}
+    item_details: dict[str, Union[str, int, float, list[str], None]] = {}
 
     # Get item title/description
     title = input("Enter item title/description (optional): ").strip()
@@ -177,11 +179,13 @@ def prompt_for_item_details() -> Optional[Dict[str, Union[str, int, float, List[
 
 class CategoryCompleter(Completer):
     # ... (implementation from v3) ...
-    def __init__(self, category_list: List[Tuple[str, str]]) -> None:
+    def __init__(self, category_list: list[tuple[str, str]]) -> None:
         self.categories = [name for name, _id in category_list]
         self.category_list = category_list
 
-    def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterable[Completion]:
         text_before_cursor = document.text_before_cursor.lower()
         if text_before_cursor:
             for category_name in self.categories:
@@ -191,7 +195,9 @@ class CategoryCompleter(Completer):
                     )
 
 
-def prompt_for_category_selection(category_completer: CategoryCompleter, name_to_id_map: Dict[str, str]) -> Tuple[Optional[str], Optional[str]]:
+def prompt_for_category_selection(
+    category_completer: CategoryCompleter, name_to_id_map: dict[str, str]
+) -> tuple[Optional[str], Optional[str]]:
     # ... (implementation from v3) ...
     history_file = os.path.join(os.path.expanduser("~"), ".ynab_amazon_cat_history")
     history = FileHistory(history_file)
@@ -263,10 +269,7 @@ def main() -> None:
     print(f"\nFound {len(categories_list)} usable categories. Completion enabled.")
 
     # Setup history for memo input (optional, but can be nice)
-    memo_history_file = os.path.join(
-        os.path.expanduser("~"), ".ynab_amazon_memo_history"
-    )
-
+    os.path.join(os.path.expanduser("~"), ".ynab_amazon_memo_history")
 
     # Ask user if they want to provide Amazon orders data for automatic item detection
     print("\n--- Optional: Amazon Orders Data ---")
@@ -374,7 +377,9 @@ def main() -> None:
                 else:
                     order_id = matching_order.get("order_id")
                     total = matching_order.get("total")
-                    date_str = matching_order.get("date") or matching_order.get("date_str")
+                    date_str = matching_order.get("date") or matching_order.get(
+                        "date_str"
+                    )
                     items = matching_order.get("items", [])
 
                 print(f"     Order ID: {order_id}")
@@ -413,7 +418,9 @@ def main() -> None:
                 should_offer_split = False
                 if matching_order:
                     if isinstance(matching_order, Order):
-                        should_offer_split = bool(matching_order.items and len(matching_order.items) > 1)
+                        should_offer_split = bool(
+                            matching_order.items and len(matching_order.items) > 1
+                        )
                     else:
                         items = matching_order.get("items", [])
                         should_offer_split = bool(items and len(items) > 1)
@@ -435,7 +442,9 @@ def main() -> None:
                         continue  # Back to action prompt
 
                     # --- ENHANCED MEMO INPUT WITH AUTOMATIC ITEM DETECTION ---
-                    item_details: Optional[Dict[str, Union[str, int, float, List[str], None]]] = None
+                    item_details: Optional[
+                        dict[str, Union[str, int, float, list[str], None]]
+                    ] = None
                     enhanced_memo = None
 
                     # Use matched order data or prompt for manual entry
@@ -453,7 +462,8 @@ def main() -> None:
                                 "order_id": matching_order.get("order_id", ""),
                                 "items": matching_order.get("items", []),
                                 "total": matching_order.get("total"),
-                                "date": matching_order.get("date") or matching_order.get("date_str"),
+                                "date": matching_order.get("date")
+                                or matching_order.get("date_str"),
                             }
                     else:
                         # Ask if user wants to enter item details manually
@@ -478,7 +488,9 @@ def main() -> None:
                             memo_generator = MemoGenerator()
                             order_id_value = item_details["order_id"]
                             order_link = memo_generator.generate_amazon_order_link(
-                                order_id_value if isinstance(order_id_value, str) else None
+                                order_id_value
+                                if isinstance(order_id_value, str)
+                                else None
                             )
                             enhanced_memo = (
                                 f"{items_text}\n {order_link}"
@@ -541,7 +553,7 @@ def main() -> None:
                 else:
                     # --- SPLITTING ---
                     print("\n--- Splitting Transaction ---")
-                    subtransactions: List[Dict[str, Union[int, str, None]]] = []
+                    subtransactions: list[dict[str, Union[int, str, None]]] = []
                     remaining_milliunits = amount_milliunits
                     split_count = 1
 
@@ -638,7 +650,9 @@ def main() -> None:
                                 items_text = items[split_count - 1]
                                 # Use extracted memo generator
                                 memo_generator = MemoGenerator()
-                                order_link = memo_generator.generate_amazon_order_link(order_id)
+                                order_link = memo_generator.generate_amazon_order_link(
+                                    order_id
+                                )
                                 suggested_split_memo = (
                                     f"{items_text}\n {order_link}"
                                     if order_link
@@ -687,8 +701,14 @@ def main() -> None:
                             print(
                                 f"Enter optional memo for '{category_name}' split (multiline):"
                             )
-                            split_memo_input = get_multiline_input_with_custom_submit("> ")
-                            split_memo = split_memo_input.strip() if split_memo_input is not None else ""
+                            split_memo_input = get_multiline_input_with_custom_submit(
+                                "> "
+                            )
+                            split_memo = (
+                                split_memo_input.strip()
+                                if split_memo_input is not None
+                                else ""
+                            )
                         # --- END ENHANCED SPLIT MEMO INPUT ---
 
                         subtransactions.append(

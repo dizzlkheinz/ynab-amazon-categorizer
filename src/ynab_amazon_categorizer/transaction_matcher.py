@@ -1,7 +1,9 @@
 """Transaction matching functionality."""
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Optional, Union, Sequence
+from typing import Any, Optional, Union
+
 from .amazon_parser import Order
 
 
@@ -11,7 +13,12 @@ class TransactionMatcher:
     def __init__(self) -> None:
         pass
 
-    def find_matching_order(self, transaction_amount: float, transaction_date: str, parsed_orders: Sequence[Union[Order, dict[str, Any]]]) -> Optional[Union[Order, dict[str, Any]]]:
+    def find_matching_order(
+        self,
+        transaction_amount: float,
+        transaction_date: str,
+        parsed_orders: Sequence[Union[Order, dict[str, Any]]],
+    ) -> Optional[Union[Order, dict[str, Any]]]:
         """Find the best matching order for a transaction using sophisticated scoring"""
         if not parsed_orders:
             return None
