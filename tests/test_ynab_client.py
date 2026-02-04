@@ -33,6 +33,7 @@ def test_get_data_success(mock_get: Mock) -> None:
     mock_get.assert_called_once_with(
         "https://api.ynab.com/v1/test/endpoint",
         headers={"Authorization": "Bearer test_key"},
+        timeout=30,
     )
 
 
@@ -73,6 +74,7 @@ def test_update_transaction_success(mock_put: Mock) -> None:
             "Content-Type": "application/json",
         },
         json={"transaction": payload},
+        timeout=30,
     )
 
 

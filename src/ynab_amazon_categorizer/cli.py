@@ -1,3 +1,4 @@
+import copy
 import json
 import os  # For history file path
 from collections.abc import Iterable
@@ -165,7 +166,163 @@ def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None]
     return item_details if item_details else None
 
 
-# --- Helper Functions ---
+# --- Extracted Helper Functions ---
+
+
+def print_config_summary(config: Config) -> None:
+    """Print configuration summary without exposing secrets."""
+    print("✓ Configuration loaded successfully")
+    print("✓ API Key: configured")
+    if config.budget_id and len(config.budget_id) >= 4:
+        print(f"✓ Budget ID: ...{config.budget_id[-4:]}")
+    else:
+        print("✓ Budget ID: configured")
+    if config.account_id and config.account_id.lower() != "none":
+        print("✓ Account ID: configured")
+    else:
+        print("✓ All accounts")
+
+
+def build_preview(
+    payload: dict[str, Any], category_id_map: dict[str, str]
+) -> dict[str, Any]:
+    """Build a preview dict from payload with category names injected.
+
+    Uses deep copy to avoid mutating the original payload.
+    """
+    preview_dict: dict[str, Any] = copy.deepcopy(payload)
+    category_id = preview_dict.get("category_id")
+    if isinstance(category_id, str):
+        category_name = category_id_map.get(category_id, "Unknown Category")
+        preview_dict["category_name"] = category_name
+    subtransactions_value = preview_dict.get("subtransactions")
+    if isinstance(subtransactions_value, list):
+        for subtrans in subtransactions_value:
+            if not isinstance(subtrans, dict):
+                continue
+            subtrans_category_id = subtrans.get("category_id")
+            if isinstance(subtrans_category_id, str):
+                cat_name = category_id_map.get(subtrans_category_id, "Unknown Category")
+                subtrans["category_name"] = cat_name
+    return preview_dict
+
+
+def compute_split_amount(amount_float: float, remaining_milliunits: int) -> int:
+    """Convert a positive user-entered amount to signed milliunits matching the parent.
+
+    The sign of the result matches ``remaining_milliunits`` (negative for outflows,
+    positive for inflows/refunds).
+
+    Raises ``ValueError`` if the amount exceeds the remaining balance.
+    """
+    split_amount_milliunits = int(round(amount_float * 1000))
+
+    if split_amount_milliunits > abs(remaining_milliunits) + 1:
+        raise ValueError(
+            f"Amount exceeds remaining. Max {abs(remaining_milliunits / 1000.0):.2f}"
+        )
+
+    # Apply sign to match parent transaction direction
+    if remaining_milliunits < 0:
+        split_amount_milliunits = -abs(split_amount_milliunits)
+    else:
+        split_amount_milliunits = abs(split_amount_milliunits)
+
+    # Snap to exact remainder when within 1 milliunit
+    if abs(abs(split_amount_milliunits) - abs(remaining_milliunits)) <= 1:
+        split_amount_milliunits = remaining_milliunits
+
+    return split_amount_milliunits
+
+
+def build_single_payload(
+    transaction: dict[str, Any],
+    category_id: str,
+    memo: str,
+) -> dict[str, Any]:
+    """Build update payload for a single-category transaction."""
+    return {
+        "id": transaction["id"],
+        "account_id": transaction["account_id"],
+        "date": transaction["date"],
+        "amount": transaction["amount"],
+        "payee_id": transaction.get("payee_id"),
+        "payee_name": transaction.get("payee_name", "N/A"),
+        "category_id": category_id,
+        "memo": memo,
+        "cleared": transaction.get("cleared"),
+        "approved": True,
+        "flag_color": transaction.get("flag_color"),
+        "import_id": transaction.get("import_id"),
+    }
+
+
+def build_split_payload(
+    transaction: dict[str, Any],
+    subtransactions: list[dict[str, int | str | None]],
+    matching_order: Order | dict[str, Any] | None,
+    original_memo: str,
+) -> dict[str, Any]:
+    """Build update payload for a split transaction."""
+    return {
+        "id": transaction["id"],
+        "account_id": transaction["account_id"],
+        "date": transaction["date"],
+        "amount": transaction["amount"],
+        "payee_id": transaction.get("payee_id"),
+        "payee_name": transaction.get("payee_name", "N/A"),
+        "category_id": None,
+        "memo": generate_split_summary_memo(matching_order)
+        if matching_order and isinstance(matching_order, Order)
+        else original_memo,
+        "cleared": transaction.get("cleared"),
+        "approved": True,
+        "flag_color": transaction.get("flag_color"),
+        "import_id": transaction.get("import_id"),
+        "subtransactions": subtransactions,
+    }
+
+
+def fetch_amazon_transactions(
+    ynab_client: YNABClient, config: Config
+) -> list[dict[str, Any]]:
+    """Fetch transactions from YNAB and filter to uncategorized Amazon ones."""
+    transactions_endpoint = f"/budgets/{config.budget_id}/transactions"
+    if config.account_id and config.account_id.lower() != "none":
+        transactions_endpoint = (
+            f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
+        )
+    transactions_data = ynab_client.get_data(transactions_endpoint)
+    if not isinstance(transactions_data, dict):
+        return []
+    transactions_raw_obj = transactions_data.get("transactions")
+    if not isinstance(transactions_raw_obj, list):
+        return []
+    transactions_raw: list[Any] = transactions_raw_obj
+    transactions: list[dict[str, Any]] = [
+        transaction for transaction in transactions_raw if isinstance(transaction, dict)
+    ]
+    print(f"Fetched {len(transactions)} transactions.")
+    transactions_to_process = []
+    for t in transactions:
+        payee_name = t.get("payee_name", "").lower() if t.get("payee_name") else ""
+        is_amazon = any(keyword in payee_name for keyword in AMAZON_PAYEE_KEYWORDS)
+        is_uncategorized = t.get("category_id") is None
+        is_not_reconciled = t.get("cleared") != "reconciled"
+        is_valid_for_processing = (
+            is_amazon
+            and is_uncategorized
+            and is_not_reconciled
+            and t.get("amount", 0) != 0
+            and t.get("transfer_account_id") is None
+            and not t.get("subtransactions")
+            and t.get("import_id") is not None
+        )
+        if is_valid_for_processing:
+            transactions_to_process.append(t)
+    return transactions_to_process
+
+
 # NOTE: YNAB API functions have been moved to ynab_client.py
 
 
@@ -239,14 +396,7 @@ def main() -> None:
     # Load configuration using extracted Config class
     try:
         config = Config.from_env()
-        print("✓ Configuration loaded successfully")
-        print(f"✓ API Key: {config.api_key[:8]}...")
-        print(f"✓ Budget ID: {config.budget_id[:8]}...")
-        print(
-            f"✓ Account ID: {config.account_id[:8]}..."
-            if config.account_id
-            else "✓ All accounts"
-        )
+        print_config_summary(config)
     except Exception as e:
         print(f"ERROR: {e}")
         print("Please set environment variables or create a .env file.")
@@ -255,6 +405,7 @@ def main() -> None:
 
     # Initialize YNAB client
     ynab_client = YNABClient(config.api_key, config.budget_id)
+    memo_generator = MemoGenerator(config.amazon_domain)
 
     print("Fetching categories...")
     categories_list, category_name_map, category_id_map = ynab_client.get_categories()
@@ -295,41 +446,7 @@ def main() -> None:
             print("No valid orders found in provided data.")
 
     print("\nFetching transactions...")
-    # (Transaction fetching and filtering logic remains the same as v3)
-    transactions_endpoint = f"/budgets/{config.budget_id}/transactions"
-    if config.account_id and config.account_id.lower() != "none":
-        transactions_endpoint = (
-            f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
-        )
-    transactions_data = ynab_client.get_data(transactions_endpoint)
-    if not isinstance(transactions_data, dict):
-        return
-    transactions_raw_obj = transactions_data.get("transactions")
-    if not isinstance(transactions_raw_obj, list):
-        return
-    transactions_raw: list[Any] = transactions_raw_obj
-    transactions: list[dict[str, Any]] = [
-        transaction for transaction in transactions_raw if isinstance(transaction, dict)
-    ]
-    print(f"Fetched {len(transactions)} transactions.")
-    transactions_to_process = []
-    for t in transactions:
-        # ... (Filtering logic same as v3) ...
-        payee_name = t.get("payee_name", "").lower() if t.get("payee_name") else ""
-        is_amazon = any(keyword in payee_name for keyword in AMAZON_PAYEE_KEYWORDS)
-        is_uncategorized = t.get("category_id") is None
-        is_not_reconciled = t.get("cleared") != "reconciled"
-        is_valid_for_processing = (
-            is_amazon
-            and is_uncategorized
-            and is_not_reconciled
-            and t.get("amount", 0) != 0
-            and t.get("transfer_account_id") is None
-            and not t.get("subtransactions")
-            and t.get("import_id") is not None
-        )
-        if is_valid_for_processing:
-            transactions_to_process.append(t)
+    transactions_to_process = fetch_amazon_transactions(ynab_client, config)
     print(
         f"\nFound {len(transactions_to_process)} uncategorized Amazon transaction(s) needing attention."
     )
@@ -389,8 +506,6 @@ def main() -> None:
                 print(f"     Order ID: {order_id}")
                 print(f"     Total: ${total if total is not None else 'N/A'}")
                 print(f"     Date: {date_str if date_str is not None else 'N/A'}")
-                # Use extracted memo generator for order link
-                memo_generator = MemoGenerator()
                 order_link = memo_generator.generate_amazon_order_link(order_id)
                 print(f"     Order Link: {order_link}")
                 if items:
@@ -488,8 +603,6 @@ def main() -> None:
                                 if isinstance(items_list, list) and items_list
                                 else "Amazon Purchase"
                             )
-                            # Use extracted memo generator
-                            memo_generator = MemoGenerator()
                             order_id_value = item_details["order_id"]
                             order_link = memo_generator.generate_amazon_order_link(
                                 order_id_value
@@ -502,8 +615,7 @@ def main() -> None:
                                 else items_text
                             )
                         else:
-                            # Manual item details - use extracted memo generator
-                            memo_generator = MemoGenerator()
+                            # Manual item details
                             enhanced_memo = memo_generator.generate_enhanced_memo(
                                 original_memo, None, item_details
                             )
@@ -535,24 +647,11 @@ def main() -> None:
                             memo_input = memo_input.strip()
                     # --- END ENHANCED MEMO INPUT ---
 
-                    update_payload = {
-                        # ... (id, account_id, date, amount etc. same as v3) ...
-                        "id": transaction_id,
-                        "account_id": t["account_id"],
-                        "date": t["date"],
-                        "amount": amount_milliunits,
-                        "payee_id": t.get("payee_id"),
-                        "payee_name": payee,
-                        "category_id": category_id,
-                        "memo": memo_input
-                        if memo_input
-                        else original_memo,  # Use new memo or keep original
-                        "cleared": t.get("cleared"),
-                        "approved": True,
-                        "flag_color": t.get("flag_color"),
-                        "import_id": t.get("import_id"),
-                    }
-                    updated_payload_dict = update_payload
+                    updated_payload_dict = build_single_payload(
+                        t,
+                        category_id,
+                        memo_input if memo_input else original_memo,
+                    )
 
                 else:
                     # --- SPLITTING ---
@@ -590,7 +689,7 @@ def main() -> None:
                             subtransactions = []  # Clear partial splits
                             break  # Back to action prompt
 
-                        # Get amount for this split (logic same as v3)
+                        # Get amount for this split
                         while True:
                             try:
                                 max_amount = abs(remaining_milliunits / 1000.0)
@@ -599,40 +698,22 @@ def main() -> None:
                                 )
                                 if not amount_str:
                                     amount_str = str(max_amount)
-                                # ... (amount validation and calculation same as v3) ...
                                 split_amount_float = float(amount_str)
                                 if split_amount_float <= 0:
                                     print("Amount must be positive.")
                                     continue
-                                split_amount_milliunits = int(
-                                    round(split_amount_float * 1000)
+                                split_amount_milliunits = compute_split_amount(
+                                    split_amount_float, remaining_milliunits
                                 )
-                                if (
-                                    split_amount_milliunits
-                                    > abs(remaining_milliunits) + 1
-                                ):
-                                    print(
-                                        f"Amount exceeds remaining. Max {abs(remaining_milliunits / 1000.0):.2f}"
-                                    )
-                                    continue
-                                split_amount_milliunits = -abs(
-                                    split_amount_milliunits
-                                )  # Ensure negative for outflow
-                                if (
-                                    abs(split_amount_milliunits - remaining_milliunits)
-                                    <= 1
-                                ):  # Equal or very close
+                                if split_amount_milliunits == remaining_milliunits:
                                     print("Amount covers remaining balance.")
-                                    split_amount_milliunits = (
-                                        remaining_milliunits  # Assign exact remainder
-                                    )
-                                elif split_amount_milliunits > abs(
-                                    remaining_milliunits
-                                ):
-                                    continue  # Should be caught, but safety
                                 break  # Amount valid
-                            except ValueError:
-                                print("Invalid amount.")
+                            except ValueError as e:
+                                print(
+                                    str(e)
+                                    if str(e) != str(e).lower()
+                                    else "Invalid amount."
+                                )
 
                         # --- ENHANCED SPLIT MEMO INPUT ---
                         # Generate memo for each split based on matched order data
@@ -652,8 +733,6 @@ def main() -> None:
                             if split_count <= len(items):
                                 # Use the specific item for this split
                                 items_text = items[split_count - 1]
-                                # Use extracted memo generator
-                                memo_generator = MemoGenerator()
                                 order_link = memo_generator.generate_amazon_order_link(
                                     order_id
                                 )
@@ -673,8 +752,6 @@ def main() -> None:
                             if manual_entry == "y":
                                 item_details = prompt_for_item_details()
                                 if item_details:
-                                    # Use extracted memo generator
-                                    memo_generator = MemoGenerator()
                                     suggested_split_memo = (
                                         memo_generator.generate_enhanced_memo(
                                             "", None, item_details
@@ -737,25 +814,9 @@ def main() -> None:
 
                     # End of splitting loop
                     if remaining_milliunits == 0 and subtransactions:
-                        update_payload = {
-                            # ... (id, account_id, date, amount etc. same as v3) ...
-                            "id": transaction_id,
-                            "account_id": t["account_id"],
-                            "date": t["date"],
-                            "amount": amount_milliunits,
-                            "payee_id": t.get("payee_id"),
-                            "payee_name": payee,
-                            "category_id": None,  # Null for splits
-                            "memo": generate_split_summary_memo(matching_order)
-                            if matching_order and isinstance(matching_order, Order)
-                            else original_memo,  # Generate summary memo for splits
-                            "cleared": t.get("cleared"),
-                            "approved": True,
-                            "flag_color": t.get("flag_color"),
-                            "import_id": t.get("import_id"),
-                            "subtransactions": subtransactions,
-                        }
-                        updated_payload_dict = update_payload
+                        updated_payload_dict = build_split_payload(
+                            t, subtransactions, matching_order, original_memo
+                        )
                     else:
                         print("Splitting cancelled. No changes will be made.")
                         # updated_payload_dict remains None
@@ -763,25 +824,7 @@ def main() -> None:
                 # --- Confirmation and API Call (same as v3) ---
                 if updated_payload_dict:
                     print("\n--- Preview Update ---")
-                    # Add category names to preview for better readability
-                    preview_dict: dict[str, Any] = updated_payload_dict.copy()
-                    category_id = preview_dict.get("category_id")
-                    if isinstance(category_id, str):
-                        category_name = category_id_map.get(
-                            category_id, "Unknown Category"
-                        )
-                        preview_dict["category_name"] = category_name
-                    subtransactions_value = preview_dict.get("subtransactions")
-                    if isinstance(subtransactions_value, list):
-                        for subtrans in subtransactions_value:
-                            if not isinstance(subtrans, dict):
-                                continue
-                            subtrans_category_id = subtrans.get("category_id")
-                            if isinstance(subtrans_category_id, str):
-                                cat_name = category_id_map.get(
-                                    subtrans_category_id, "Unknown Category"
-                                )
-                                subtrans["category_name"] = cat_name
+                    preview_dict = build_preview(updated_payload_dict, category_id_map)
                     print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
                     confirm = input("Confirm update? (y/n, default y): ").lower()
                     if not confirm:

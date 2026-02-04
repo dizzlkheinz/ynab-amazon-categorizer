@@ -8,6 +8,8 @@ import requests
 class YNABClient:
     """Client for interacting with YNAB API."""
 
+    TIMEOUT = 30  # Default timeout in seconds
+
     def __init__(self, api_key: str, budget_id: str) -> None:
         self.api_key = api_key
         self.budget_id = budget_id
@@ -16,10 +18,11 @@ class YNABClient:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=self.TIMEOUT)
             response.raise_for_status()
-            return response.json()["data"]
-        except requests.exceptions.RequestException:
+            json_res = response.json()
+            return json_res.get("data")
+        except (requests.exceptions.RequestException, KeyError, ValueError):
             return None
 
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> bool:
@@ -29,7 +32,12 @@ class YNABClient:
         }
         url = f"https://api.ynab.com/v1/budgets/{self.budget_id}/transactions/{transaction_id}"
         try:
-            response = requests.put(url, headers=headers, json={"transaction": payload})
+            response = requests.put(
+                url,
+                headers=headers,
+                json={"transaction": payload},
+                timeout=self.TIMEOUT,
+            )
             response.raise_for_status()
             return True
         except requests.exceptions.RequestException:

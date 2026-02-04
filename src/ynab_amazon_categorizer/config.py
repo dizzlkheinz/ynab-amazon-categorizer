@@ -16,10 +16,17 @@ except ImportError:
 class Config:
     """Configuration class for YNAB Amazon Categorizer."""
 
-    def __init__(self, api_key: str, budget_id: str, account_id: str | None = None):
+    def __init__(
+        self,
+        api_key: str,
+        budget_id: str,
+        account_id: str | None = None,
+        amazon_domain: str = "amazon.ca",
+    ):
         self.api_key = api_key
         self.budget_id = budget_id
         self.account_id = account_id
+        self.amazon_domain = amazon_domain
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -37,10 +44,11 @@ class Config:
         api_key = os.getenv("YNAB_API_KEY")
         budget_id = os.getenv("YNAB_BUDGET_ID")
         account_id = os.getenv("YNAB_ACCOUNT_ID", "none")  # Default to "none"
+        amazon_domain = os.getenv("AMAZON_DOMAIN", "amazon.ca")
 
         if not api_key:
             raise ConfigurationError("YNAB_API_KEY environment variable is required")
         if not budget_id:
             raise ConfigurationError("YNAB_BUDGET_ID environment variable is required")
 
-        return cls(api_key, budget_id, account_id)
+        return cls(api_key, budget_id, account_id, amazon_domain)
