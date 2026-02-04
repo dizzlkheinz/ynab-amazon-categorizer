@@ -1,6 +1,7 @@
 import json
 import os  # For history file path
 from collections.abc import Iterable
+from typing import Any
 
 # --- NEW: Import prompt_toolkit components ---
 from prompt_toolkit import prompt
@@ -301,9 +302,15 @@ def main() -> None:
             f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
         )
     transactions_data = ynab_client.get_data(transactions_endpoint)
-    if transactions_data is None or "transactions" not in transactions_data:
-        exit()
-    transactions = transactions_data["transactions"]
+    if not isinstance(transactions_data, dict):
+        return
+    transactions_raw_obj = transactions_data.get("transactions")
+    if not isinstance(transactions_raw_obj, list):
+        return
+    transactions_raw: list[Any] = transactions_raw_obj
+    transactions: list[dict[str, Any]] = [
+        transaction for transaction in transactions_raw if isinstance(transaction, dict)
+    ]
     print(f"Fetched {len(transactions)} transactions.")
     transactions_to_process = []
     for t in transactions:
@@ -408,7 +415,7 @@ def main() -> None:
                 break  # Next transaction
             elif action == "c":
                 # --- Categorization Logic ---
-                updated_payload_dict = None
+                updated_payload_dict: dict[str, Any] | None = None
 
                 # Check if there are multiple items and suggest splitting
                 # Check if we should offer splitting
@@ -755,17 +762,20 @@ def main() -> None:
                 if updated_payload_dict:
                     print("\n--- Preview Update ---")
                     # Add category names to preview for better readability
-                    preview_dict = updated_payload_dict.copy()
-                    if preview_dict.get("category_id"):
-                        category_name = category_id_map.get(
-                            preview_dict["category_id"], "Unknown Category"
-                        )
+                    preview_dict: dict[str, Any] = updated_payload_dict.copy()
+                    category_id = preview_dict.get("category_id")
+                    if isinstance(category_id, str):
+                        category_name = category_id_map.get(category_id, "Unknown Category")
                         preview_dict["category_name"] = category_name
-                    if preview_dict.get("subtransactions"):
-                        for subtrans in preview_dict["subtransactions"]:
-                            if subtrans.get("category_id"):
+                    subtransactions_value = preview_dict.get("subtransactions")
+                    if isinstance(subtransactions_value, list):
+                        for subtrans in subtransactions_value:
+                            if not isinstance(subtrans, dict):
+                                continue
+                            subtrans_category_id = subtrans.get("category_id")
+                            if isinstance(subtrans_category_id, str):
                                 cat_name = category_id_map.get(
-                                    subtrans["category_id"], "Unknown Category"
+                                    subtrans_category_id, "Unknown Category"
                                 )
                                 subtrans["category_name"] = cat_name
                     print(json.dumps(preview_dict, indent=2, ensure_ascii=False))

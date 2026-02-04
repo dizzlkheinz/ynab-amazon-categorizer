@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock, patch
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 from ynab_amazon_categorizer.ynab_client import YNABClient
 
@@ -121,7 +121,7 @@ def test_get_categories_calls_get_data() -> None:
     categories, name_to_id, id_to_name = client.get_categories()
 
     # Assert
-    client.get_data.assert_called_once_with("/budgets/test_budget/categories")
+    mock_get_data.assert_called_once_with("/budgets/test_budget/categories")
     assert len(categories) == 1
     assert categories[0] == ("Test Group: Test Category", "cat1")
     assert "test group: test category" in name_to_id

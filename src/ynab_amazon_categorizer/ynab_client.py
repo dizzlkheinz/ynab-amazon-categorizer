@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import requests  # type: ignore[import-untyped]
+import requests
 
 
 class YNABClient:

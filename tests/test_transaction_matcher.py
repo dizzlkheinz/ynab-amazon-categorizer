@@ -1,5 +1,7 @@
 """Tests for transaction matching functionality."""
 
+from typing import Any, cast
+
 from ynab_amazon_categorizer.transaction_matcher import TransactionMatcher
 
 
@@ -33,8 +35,9 @@ def test_find_matching_order_exact_amount_match() -> None:
     # Assert
     assert result is not None
     if isinstance(result, dict):
-        assert result["order_id"] == "702-8237239-1234567"
-        assert result["total"] == 57.57
+        result_dict = cast(dict[str, Any], result)
+        assert result_dict["order_id"] == "702-8237239-1234567"
+        assert result_dict["total"] == 57.57
     else:
         assert result.order_id == "702-8237239-1234567"
         assert result.total == 57.57

@@ -64,7 +64,7 @@ class TransactionMatcher:
             elif isinstance(order, dict) and "date" in order:
                 order_date_str = order["date"]
 
-            if trans_date and order_date_str:
+            if trans_date and isinstance(order_date_str, str) and order_date_str:
                 try:
                     # Parse order date (format like "July 31, 2025")
                     order_date = datetime.strptime(order_date_str, "%B %d, %Y")
