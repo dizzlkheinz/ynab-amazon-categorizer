@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any
 
 from .amazon_parser import Order
 
@@ -17,9 +17,13 @@ class TransactionMatcher:
         self,
         transaction_amount: float,
         transaction_date: str,
-        parsed_orders: Sequence[Union[Order, dict[str, Any]]],
-    ) -> Optional[Union[Order, dict[str, Any]]]:
-        """Find the best matching order for a transaction using sophisticated scoring"""
+        parsed_orders: Sequence[Order | dict[str, Any]],
+    ) -> Order | dict[str, Any] | None:
+        """Find the best matching order for a transaction.
+
+        Matching requires an exact amount match (within 1 cent).
+        Date is used only as a tie-breaker between exact-amount matches.
+        """
         if not parsed_orders:
             return None
 
@@ -37,21 +41,21 @@ class TransactionMatcher:
         for order in parsed_orders:
             score = 0
 
-            # Check amount match (most important) - handle both object and dict formats
+            # Check amount match (required) - handle both object and dict formats
             order_total = None
             if hasattr(order, "total"):
                 order_total = order.total
             elif isinstance(order, dict) and "total" in order:
                 order_total = order["total"]
 
-            if order_total:
-                amount_diff = abs(order_total - transaction_amount_abs)
-                if amount_diff < 0.01:  # Exact match
-                    score += 100
-                elif amount_diff < 1.00:  # Close match
-                    score += 50
-                elif amount_diff < 5.00:  # Reasonable match
-                    score += 20
+            if order_total is None:
+                continue
+
+            amount_diff = abs(order_total - transaction_amount_abs)
+            if amount_diff >= 0.01:
+                continue
+
+            score += 100
 
             # Check date proximity - handle both object and dict formats
             order_date_str = None
@@ -78,20 +82,4 @@ class TransactionMatcher:
                 best_score = score
                 best_match = order
 
-        # Only return match if score is reasonable and includes some amount matching
-        # Date alone should not be sufficient - need at least some amount proximity
-        has_amount_score = False
-        if best_match:
-            # Re-check if the best match has any amount scoring
-            order_total = None
-            if hasattr(best_match, "total"):
-                order_total = best_match.total
-            elif isinstance(best_match, dict) and "total" in best_match:
-                order_total = best_match["total"]
-
-            if order_total:
-                amount_diff = abs(order_total - transaction_amount_abs)
-                if amount_diff < 5.00:  # Must be within $5 for any match
-                    has_amount_score = True
-
-        return best_match if best_score >= 20 and has_amount_score else None
+        return best_match

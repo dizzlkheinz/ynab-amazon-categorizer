@@ -1,6 +1,6 @@
 """Memo generation functionality for Amazon order transactions."""
 
-from typing import Any, Optional
+from typing import Any
 
 
 class MemoGenerator:
@@ -9,7 +9,7 @@ class MemoGenerator:
     def __init__(self) -> None:
         pass
 
-    def generate_amazon_order_link(self, order_id: Optional[str]) -> Optional[str]:
+    def generate_amazon_order_link(self, order_id: str | None) -> str | None:
         """Generate Amazon.ca order details link"""
         if order_id:
             return f"https://www.amazon.ca/gp/your-account/order-details?ie=UTF8&orderID={order_id}"
@@ -18,8 +18,8 @@ class MemoGenerator:
     def generate_enhanced_memo(
         self,
         original_memo: str,
-        order_id: Optional[str],
-        item_details: Optional[Any] = None,
+        order_id: str | None,
+        item_details: Any | None = None,
     ) -> str:
         """Generate enhanced memo with order information and item details"""
         # Minimal implementation to pass the test

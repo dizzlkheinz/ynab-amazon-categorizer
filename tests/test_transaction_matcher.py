@@ -65,11 +65,11 @@ def test_find_matching_order_no_match() -> None:
     assert result is None
 
 
-def test_find_matching_order_close_amount_match() -> None:
-    """Test finding order with close amount match (within $1 tolerance)."""
+def test_find_matching_order_close_amount_no_match() -> None:
+    """Test close amount does not match when exact matching is required."""
     matcher = TransactionMatcher()
 
-    # Arrange - amount differs by $0.50, should still match
+    # Arrange - amount differs by $0.50 and should not match
     transaction_amount = 57.07
     transaction_date = "2024-07-31"
     parsed_orders = [
@@ -87,8 +87,4 @@ def test_find_matching_order_close_amount_match() -> None:
     )
 
     # Assert
-    assert result is not None
-    if isinstance(result, dict):
-        assert result["order_id"] == "702-8237239-1234567"
-    else:
-        assert result.order_id == "702-8237239-1234567"
+    assert result is None

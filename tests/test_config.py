@@ -2,11 +2,14 @@
 
 import pytest
 
+import ynab_amazon_categorizer.config as config_module
 from ynab_amazon_categorizer.config import Config
 
 
 def test_config_from_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test loading config from environment variables."""
+    monkeypatch.setattr(config_module, "DOTENV_AVAILABLE", False)
+    monkeypatch.delenv("YNAB_ACCOUNT_ID", raising=False)
     monkeypatch.setenv("YNAB_API_KEY", "test_api_key")
     monkeypatch.setenv("YNAB_BUDGET_ID", "test_budget_id")
 
@@ -16,9 +19,12 @@ def test_config_from_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.account_id == "none"  # Should default to "none"
 
 
-def test_config_missing_env_vars() -> None:
+def test_config_missing_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test config raises error when required env vars are missing."""
-    # pytest already imported at top
+    monkeypatch.setattr(config_module, "DOTENV_AVAILABLE", False)
+    monkeypatch.delenv("YNAB_API_KEY", raising=False)
+    monkeypatch.delenv("YNAB_BUDGET_ID", raising=False)
+    monkeypatch.delenv("YNAB_ACCOUNT_ID", raising=False)
 
     from ynab_amazon_categorizer.exceptions import ConfigurationError
 

@@ -1,6 +1,6 @@
 """YNAB API client functionality."""
 
-from typing import Any, Optional
+from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
@@ -12,7 +12,7 @@ class YNABClient:
         self.api_key = api_key
         self.budget_id = budget_id
 
-    def get_data(self, endpoint: str) -> Optional[dict[str, Any]]:
+    def get_data(self, endpoint: str) -> dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
         try:

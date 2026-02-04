@@ -1,7 +1,6 @@
 import json
 import os  # For history file path
 from collections.abc import Iterable
-from typing import Optional, Union
 
 # --- NEW: Import prompt_toolkit components ---
 from prompt_toolkit import prompt
@@ -34,7 +33,7 @@ YNAB_API_URL = "https://api.ynab.com/v1"
 # NOTE: Amazon order parsing has been moved to amazon_parser.py
 
 
-def prompt_for_amazon_orders_data() -> Optional[list[Order]]:
+def prompt_for_amazon_orders_data() -> list[Order] | None:
     """Prompt user to paste Amazon orders page data"""
     print("\n--- Amazon Orders Data Entry ---")
     print("You can copy and paste the content from your Amazon orders page.")
@@ -74,7 +73,7 @@ def prompt_for_amazon_orders_data() -> Optional[list[Order]]:
 
 def get_multiline_input_with_custom_submit(
     prompt_message: str = "Enter multiline text: ",
-) -> Optional[str]:
+) -> str | None:
     """Get multiline input with Ctrl+J to submit"""
     kb = KeyBindings()
 
@@ -119,13 +118,11 @@ def generate_split_summary_memo(matching_order: Order) -> str:
     return summary
 
 
-def prompt_for_item_details() -> Optional[
-    dict[str, Union[str, int, float, list[str], None]]
-]:
+def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None] | None:
     """Prompt user to enter item details manually"""
     print("\n--- Manual Item Details Entry ---")
 
-    item_details: dict[str, Union[str, int, float, list[str], None]] = {}
+    item_details: dict[str, str | int | float | list[str] | None] = {}
 
     # Get item title/description
     title = input("Enter item title/description (optional): ").strip()
@@ -197,7 +194,7 @@ class CategoryCompleter(Completer):
 
 def prompt_for_category_selection(
     category_completer: CategoryCompleter, name_to_id_map: dict[str, str]
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     # ... (implementation from v3) ...
     history_file = os.path.join(os.path.expanduser("~"), ".ynab_amazon_cat_history")
     history = FileHistory(history_file)
@@ -442,9 +439,7 @@ def main() -> None:
                         continue  # Back to action prompt
 
                     # --- ENHANCED MEMO INPUT WITH AUTOMATIC ITEM DETECTION ---
-                    item_details: Optional[
-                        dict[str, Union[str, int, float, list[str], None]]
-                    ] = None
+                    item_details: dict[str, str | int | float | list[str] | None] | None = None
                     enhanced_memo = None
 
                     # Use matched order data or prompt for manual entry
@@ -553,7 +548,7 @@ def main() -> None:
                 else:
                     # --- SPLITTING ---
                     print("\n--- Splitting Transaction ---")
-                    subtransactions: list[dict[str, Union[int, str, None]]] = []
+                    subtransactions: list[dict[str, int | str | None]] = []
                     remaining_milliunits = amount_milliunits
                     split_count = 1
 
@@ -632,7 +627,7 @@ def main() -> None:
 
                         # --- ENHANCED SPLIT MEMO INPUT ---
                         # Generate memo for each split based on matched order data
-                        split_memo: Optional[str] = None
+                        split_memo: str | None = None
                         suggested_split_memo: str = ""
 
                         # Use the already matched order if available

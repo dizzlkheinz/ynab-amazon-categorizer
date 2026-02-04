@@ -1,16 +1,15 @@
 """Amazon order parsing functionality."""
 
 import re
-from typing import Optional
 
 
 class Order:
     """Represents a parsed Amazon order."""
 
     def __init__(self) -> None:
-        self.order_id: Optional[str] = None
-        self.total: Optional[float] = None
-        self.date_str: Optional[str] = None
+        self.order_id: str | None = None
+        self.total: float | None = None
+        self.date_str: str | None = None
         self.items: list[str] = []
 
 
