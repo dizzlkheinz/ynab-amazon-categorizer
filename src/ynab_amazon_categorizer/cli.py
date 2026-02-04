@@ -446,7 +446,9 @@ def main() -> None:
                         continue  # Back to action prompt
 
                     # --- ENHANCED MEMO INPUT WITH AUTOMATIC ITEM DETECTION ---
-                    item_details: dict[str, str | int | float | list[str] | None] | None = None
+                    item_details: (
+                        dict[str, str | int | float | list[str] | None] | None
+                    ) = None
                     enhanced_memo = None
 
                     # Use matched order data or prompt for manual entry
@@ -765,7 +767,9 @@ def main() -> None:
                     preview_dict: dict[str, Any] = updated_payload_dict.copy()
                     category_id = preview_dict.get("category_id")
                     if isinstance(category_id, str):
-                        category_name = category_id_map.get(category_id, "Unknown Category")
+                        category_name = category_id_map.get(
+                            category_id, "Unknown Category"
+                        )
                         preview_dict["category_name"] = category_name
                     subtransactions_value = preview_dict.get("subtransactions")
                     if isinstance(subtransactions_value, list):
