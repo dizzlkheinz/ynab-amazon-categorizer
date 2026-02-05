@@ -475,9 +475,7 @@ def resolve_memo(
             order_link = memo_generator.generate_amazon_order_link(
                 order_id_value if isinstance(order_id_value, str) else None
             )
-            enhanced_memo = (
-                f"{items_text}\n {order_link}" if order_link else items_text
-            )
+            enhanced_memo = f"{items_text}\n {order_link}" if order_link else items_text
         else:
             # Manual item details
             enhanced_memo = memo_generator.generate_enhanced_memo(
@@ -567,9 +565,7 @@ def handle_split(
                     print("Amount covers remaining balance.")
                 break  # Amount valid
             except ValueError as e:
-                print(
-                    str(e) if str(e) != str(e).lower() else "Invalid amount."
-                )
+                print(str(e) if str(e) != str(e).lower() else "Invalid amount.")
 
         # --- ENHANCED SPLIT MEMO INPUT ---
         split_memo = _resolve_split_memo(

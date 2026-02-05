@@ -168,9 +168,7 @@ def test_find_matching_order_date_proximity_scoring() -> None:
     order_close.items = ["Close Item"]
 
     # Transaction on Jan 1 — should prefer the same-day order
-    result = matcher.find_matching_order(
-        50.00, "2024-01-01", [order_far, order_close]
-    )
+    result = matcher.find_matching_order(50.00, "2024-01-01", [order_far, order_close])
 
     assert result is not None
     assert isinstance(result, Order)

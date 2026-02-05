@@ -225,9 +225,7 @@ def test_fetch_amazon_transactions_with_account_id() -> None:
     """Uses account-specific endpoint when account_id is set."""
     mock_client = Mock()
     mock_client.get_data.return_value = {"transactions": []}
-    config = Config(
-        api_key="key", budget_id="budget", account_id="acct123"
-    )
+    config = Config(api_key="key", budget_id="budget", account_id="acct123")
 
     fetch_amazon_transactions(mock_client, config)
 
