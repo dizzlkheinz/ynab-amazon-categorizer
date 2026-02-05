@@ -1,16 +1,22 @@
 """Tests for extracted CLI helper functions."""
 
+from unittest.mock import Mock
 
 import pytest
 
+from ynab_amazon_categorizer.amazon_parser import Order
 from ynab_amazon_categorizer.cli import (
     build_preview,
     build_single_payload,
     build_split_payload,
     compute_split_amount,
+    display_matched_order,
+    fetch_amazon_transactions,
+    generate_split_summary_memo,
     print_config_summary,
 )
 from ynab_amazon_categorizer.config import Config
+from ynab_amazon_categorizer.memo_generator import MemoGenerator
 
 # --- build_preview tests ---
 
@@ -154,3 +160,144 @@ def test_print_config_summary_masks_secrets(capsys: pytest.CaptureFixture[str]) 
     assert "API Key: configured" in captured
     assert "mnop" in captured  # last 4 of budget_id
     assert "All accounts" in captured
+
+
+# --- fetch_amazon_transactions tests ---
+
+
+def test_fetch_amazon_transactions_filters_correctly() -> None:
+    """Verify that fetch_amazon_transactions filters to uncategorized Amazon transactions."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = {
+        "transactions": [
+            {
+                "id": "t1",
+                "payee_name": "Amazon.com",
+                "category_id": None,
+                "cleared": "uncleared",
+                "amount": -5000,
+                "transfer_account_id": None,
+                "subtransactions": [],
+                "import_id": "imp1",
+            },
+            {
+                "id": "t2",
+                "payee_name": "Grocery Store",
+                "category_id": None,
+                "cleared": "uncleared",
+                "amount": -3000,
+                "transfer_account_id": None,
+                "subtransactions": [],
+                "import_id": "imp2",
+            },
+            {
+                "id": "t3",
+                "payee_name": "AMZN Mktp US",
+                "category_id": "cat1",  # already categorized
+                "cleared": "uncleared",
+                "amount": -2000,
+                "transfer_account_id": None,
+                "subtransactions": [],
+                "import_id": "imp3",
+            },
+        ]
+    }
+    config = Config(api_key="key", budget_id="budget", account_id="none")
+
+    result = fetch_amazon_transactions(mock_client, config)
+
+    assert len(result) == 1
+    assert result[0]["id"] == "t1"
+
+
+def test_fetch_amazon_transactions_empty_response() -> None:
+    """Returns empty list when API returns no data."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = None
+    config = Config(api_key="key", budget_id="budget", account_id="none")
+
+    result = fetch_amazon_transactions(mock_client, config)
+
+    assert result == []
+
+
+def test_fetch_amazon_transactions_with_account_id() -> None:
+    """Uses account-specific endpoint when account_id is set."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = {"transactions": []}
+    config = Config(
+        api_key="key", budget_id="budget", account_id="acct123"
+    )
+
+    fetch_amazon_transactions(mock_client, config)
+
+    mock_client.get_data.assert_called_once_with(
+        "/budgets/budget/accounts/acct123/transactions"
+    )
+
+
+# --- generate_split_summary_memo tests ---
+
+
+def test_generate_split_summary_memo_single_item() -> None:
+    """Single-item order returns item directly."""
+    order = Order()
+    order.items = ["Widget X"]
+    assert generate_split_summary_memo(order) == "Widget X"
+
+
+def test_generate_split_summary_memo_multiple_items() -> None:
+    """Multiple items returns formatted list."""
+    order = Order()
+    order.items = ["Widget A", "Widget B"]
+    result = generate_split_summary_memo(order)
+    assert result == "2 Items:\n- Widget A\n- Widget B"
+
+
+def test_generate_split_summary_memo_no_items() -> None:
+    """Order with no items returns empty string."""
+    order = Order()
+    order.items = []
+    assert generate_split_summary_memo(order) == ""
+
+
+# --- display_matched_order tests ---
+
+
+def test_display_matched_order_with_order_object(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Display order details from an Order object."""
+    order = Order()
+    order.order_id = "702-1234567-7654321"
+    order.total = 42.99
+    order.date_str = "January 15, 2025"
+    order.items = ["Test Product"]
+
+    memo_gen = MemoGenerator("amazon.com")
+    display_matched_order(order, memo_gen)
+
+    captured = capsys.readouterr().out
+    assert "702-1234567-7654321" in captured
+    assert "42.99" in captured
+    assert "Test Product" in captured
+
+
+def test_display_matched_order_with_dict(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Display order details from a dict."""
+    order_dict = {
+        "order_id": "702-DICT",
+        "total": 19.99,
+        "date_str": "Feb 1, 2025",
+        "items": ["Dict Item"],
+    }
+
+    memo_gen = MemoGenerator("amazon.ca")
+    display_matched_order(order_dict, memo_gen)
+
+    captured = capsys.readouterr().out
+    assert "702-DICT" in captured
+    assert "19.99" in captured
+    assert "Dict Item" in captured

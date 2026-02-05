@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import os  # For history file path
 from collections.abc import Iterable
 from typing import Any
@@ -19,6 +20,8 @@ from .config import Config
 from .memo_generator import MemoGenerator
 from .transaction_matcher import TransactionMatcher
 from .ynab_client import YNABClient
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
 
@@ -302,7 +305,7 @@ def fetch_amazon_transactions(
     transactions: list[dict[str, Any]] = [
         transaction for transaction in transactions_raw if isinstance(transaction, dict)
     ]
-    print(f"Fetched {len(transactions)} transactions.")
+    logger.info("Fetched %d transactions.", len(transactions))
     transactions_to_process = []
     for t in transactions:
         payee_name = t.get("payee_name", "").lower() if t.get("payee_name") else ""
@@ -388,17 +391,454 @@ def prompt_for_category_selection(
             return None, None
 
 
+# --- Extracted per-transaction functions ---
+
+
+def display_matched_order(
+    matching_order: Order | dict[str, Any], memo_generator: MemoGenerator
+) -> None:
+    """Display matched order details to the user."""
+    if isinstance(matching_order, Order):
+        order_id = matching_order.order_id
+        total = matching_order.total
+        date_str = matching_order.date_str
+        items = matching_order.items
+    else:
+        order_id = matching_order.get("order_id")
+        total = matching_order.get("total")
+        date_str = matching_order.get("date") or matching_order.get("date_str")
+        items = matching_order.get("items", [])
+
+    print("\n  🎯 MATCHED ORDER FOUND:")
+    print(f"     Order ID: {order_id}")
+    print(f"     Total: ${total if total is not None else 'N/A'}")
+    print(f"     Date: {date_str if date_str is not None else 'N/A'}")
+    order_link = memo_generator.generate_amazon_order_link(order_id)
+    print(f"     Order Link: {order_link}")
+    if items:
+        print("     Items:")
+        for item in items:
+            print(f"       - {item}")
+    print()
+
+
+def resolve_memo(
+    matching_order: Order | dict[str, Any] | None,
+    original_memo: str,
+    memo_generator: MemoGenerator,
+) -> str:
+    """Determine the memo for a single-category transaction.
+
+    Uses matched order data when available, otherwise prompts for manual entry.
+    Returns the final memo string.
+    """
+    item_details: dict[str, str | int | float | list[str] | None] | None = None
+    enhanced_memo = None
+
+    # Use matched order data or prompt for manual entry
+    if matching_order:
+        print("Using matched order data for memo generation...")
+        if isinstance(matching_order, Order):
+            item_details = {
+                "order_id": matching_order.order_id or "",
+                "items": matching_order.items,
+                "total": matching_order.total,
+                "date": matching_order.date_str,
+            }
+        else:
+            item_details = {
+                "order_id": matching_order.get("order_id", ""),
+                "items": matching_order.get("items", []),
+                "total": matching_order.get("total"),
+                "date": matching_order.get("date") or matching_order.get("date_str"),
+            }
+    else:
+        # Ask if user wants to enter item details manually
+        manual_entry = input(
+            "No order match found. Enter item details manually? (y/n, default n): "
+        ).lower()
+        if manual_entry == "y":
+            item_details = prompt_for_item_details()
+        else:
+            item_details = None
+
+    if item_details:
+        if isinstance(item_details, dict) and "items" in item_details:
+            # Auto-matched order data - format as: Item Name\n Order Link
+            items_list = item_details["items"]
+            items_text = (
+                items_list[0]
+                if isinstance(items_list, list) and items_list
+                else "Amazon Purchase"
+            )
+            order_id_value = item_details["order_id"]
+            order_link = memo_generator.generate_amazon_order_link(
+                order_id_value if isinstance(order_id_value, str) else None
+            )
+            enhanced_memo = (
+                f"{items_text}\n {order_link}" if order_link else items_text
+            )
+        else:
+            # Manual item details
+            enhanced_memo = memo_generator.generate_enhanced_memo(
+                original_memo, None, item_details
+            )
+    else:
+        # No item details
+        enhanced_memo = original_memo
+
+    if enhanced_memo and enhanced_memo != original_memo:
+        print("\nSuggested memo:")
+        print(f"'{enhanced_memo}'")
+        use_suggested = input("Use suggested memo? (y/n, default y): ").lower()
+        if use_suggested != "n":
+            return enhanced_memo
+        else:
+            print("Enter custom memo (multiline):")
+            memo_input = get_multiline_input_with_custom_submit("> ")
+            return memo_input.strip() if memo_input else ""
+    else:
+        print("Enter optional memo (multiline):")
+        memo_input = get_multiline_input_with_custom_submit("> ")
+        return memo_input.strip() if memo_input else ""
+
+
+def handle_split(
+    transaction: dict[str, Any],
+    matching_order: Order | dict[str, Any] | None,
+    memo_generator: MemoGenerator,
+    category_completer: CategoryCompleter,
+    category_name_map: dict[str, str],
+) -> list[dict[str, int | str | None]] | None:
+    """Handle split transaction flow.
+
+    Returns list of subtransaction dicts, or None if cancelled.
+    """
+    print("\n--- Splitting Transaction ---")
+    subtransactions: list[dict[str, int | str | None]] = []
+    amount_milliunits = transaction["amount"]
+    remaining_milliunits = amount_milliunits
+    split_count = 1
+
+    while remaining_milliunits != 0:
+        print(
+            f"\nSplit {split_count}: Amount remaining: {abs(remaining_milliunits / 1000.0):.2f}"
+        )
+
+        # Show which item this split is for if we have matched order data
+        items: list[str] = []
+        if matching_order:
+            if isinstance(matching_order, Order):
+                items = matching_order.items or []
+            else:
+                items = matching_order.get("items", [])
+
+        if items:
+            if split_count <= len(items):
+                print(f"Item {split_count}: {items[split_count - 1]}")
+            else:
+                print("Additional split for remaining items")
+
+        print(f"Enter category name for split {split_count}:")
+        category_id, category_name = prompt_for_category_selection(
+            category_completer, category_name_map
+        )
+        if category_id is None:  # User backed out
+            print("Cancelling split process.")
+            return None
+
+        # Get amount for this split
+        while True:
+            try:
+                max_amount = abs(remaining_milliunits / 1000.0)
+                amount_str = input(
+                    f"Enter amount for '{category_name}' (positive, max {max_amount:.2f}, default {max_amount:.2f}): "
+                )
+                if not amount_str:
+                    amount_str = str(max_amount)
+                split_amount_float = float(amount_str)
+                if split_amount_float <= 0:
+                    print("Amount must be positive.")
+                    continue
+                split_amount_milliunits = compute_split_amount(
+                    split_amount_float, remaining_milliunits
+                )
+                if split_amount_milliunits == remaining_milliunits:
+                    print("Amount covers remaining balance.")
+                break  # Amount valid
+            except ValueError as e:
+                print(
+                    str(e) if str(e) != str(e).lower() else "Invalid amount."
+                )
+
+        # --- ENHANCED SPLIT MEMO INPUT ---
+        split_memo = _resolve_split_memo(
+            matching_order, memo_generator, category_name, split_count
+        )
+        # --- END ENHANCED SPLIT MEMO INPUT ---
+
+        subtransactions.append(
+            {
+                "amount": split_amount_milliunits,
+                "category_id": category_id,
+                "memo": split_memo if split_memo else None,
+            }
+        )
+
+        remaining_milliunits -= split_amount_milliunits
+        split_count += 1
+
+        if abs(remaining_milliunits) <= 1:  # Handle tiny remainder
+            print("Remaining amount negligible.")
+            if subtransactions:
+                print(
+                    f"Adjusting last split amount by {remaining_milliunits} milliunits."
+                )
+                subtransactions[-1]["amount"] += remaining_milliunits
+            remaining_milliunits = 0  # Force complete
+
+    if remaining_milliunits == 0 and subtransactions:
+        return subtransactions
+    return None
+
+
+def _resolve_split_memo(
+    matching_order: Order | dict[str, Any] | None,
+    memo_generator: MemoGenerator,
+    category_name: str | None,
+    split_count: int,
+) -> str:
+    """Resolve memo for a single split within a split transaction."""
+    suggested_split_memo: str = ""
+
+    if matching_order:
+        print("Using matched order data for split memo...")
+        if isinstance(matching_order, Order):
+            items = matching_order.items
+            order_id = matching_order.order_id
+        else:
+            items = matching_order.get("items", [])
+            order_id = matching_order.get("order_id")
+
+        if split_count <= len(items):
+            items_text = items[split_count - 1]
+            order_link = memo_generator.generate_amazon_order_link(order_id)
+            suggested_split_memo = (
+                f"{items_text}\n {order_link}" if order_link else items_text
+            )
+        else:
+            suggested_split_memo = "Additional item"
+    else:
+        manual_entry = input(
+            "Enter item details for this split? (y/n, default n): "
+        ).lower()
+        if manual_entry == "y":
+            item_details = prompt_for_item_details()
+            if item_details:
+                suggested_split_memo = memo_generator.generate_enhanced_memo(
+                    "", None, item_details
+                )
+
+    if suggested_split_memo:
+        print(f"Suggested memo for '{category_name}' split:")
+        print(f"'{suggested_split_memo}'")
+        use_suggested = input("Use suggested memo? (y/n, default y): ").lower()
+        if use_suggested != "n":
+            return suggested_split_memo
+        else:
+            print(f"Enter custom memo for '{category_name}' split (multiline):")
+            split_memo = get_multiline_input_with_custom_submit("> ")
+            return split_memo.strip() if split_memo else ""
+    else:
+        print(f"Enter optional memo for '{category_name}' split (multiline):")
+        split_memo_input = get_multiline_input_with_custom_submit("> ")
+        return split_memo_input.strip() if split_memo_input else ""
+
+
+def process_transaction(
+    transaction: dict[str, Any],
+    index: int,
+    total: int,
+    parsed_orders: list[Order] | None,
+    memo_generator: MemoGenerator,
+    ynab_client: YNABClient,
+    category_completer: CategoryCompleter,
+    category_name_map: dict[str, str],
+    category_id_map: dict[str, str],
+) -> bool:
+    """Process a single transaction through the interactive flow.
+
+    Returns True if processed/skipped, False if user quit.
+    """
+    transaction_id = transaction["id"]
+    date = transaction["date"]
+    payee = transaction.get("payee_name", "N/A")
+    amount_milliunits = transaction["amount"]
+    amount_float = amount_milliunits / 1000.0
+    original_memo = transaction.get("memo", "")
+
+    if amount_milliunits > 0:
+        print(f"Found inflow transaction: {payee} ${amount_float:.2f}")
+        process_inflow = input(
+            "Process this inflow (refund/credit)? (y/n, default n): "
+        ).lower()
+        if process_inflow != "y":
+            print("Skipping inflow transaction.")
+            return True
+
+    print(f"\n--- Processing Transaction {index + 1}/{total} ---")
+    print(f"  ID:   {transaction_id}")
+    print(f"  Date: {date}")
+    print(f"  Payee: {payee}")
+    print(f"  Amount: {-amount_float:.2f}")
+    if original_memo:
+        print(f"  Original Memo: {original_memo}")
+
+    # Try to find matching order from parsed data and show it
+    matching_order: Order | dict[str, Any] | None = None
+    if parsed_orders:
+        transaction_matcher = TransactionMatcher()
+        matching_order = transaction_matcher.find_matching_order(
+            amount_float, date, parsed_orders
+        )
+        if matching_order:
+            display_matched_order(matching_order, memo_generator)
+        else:
+            print("  ⚠ No matching order found in parsed Amazon data")
+
+    while True:  # Action loop (c, s, q)
+        action = input(
+            "Action? (c = categorize/split, s = skip, q = quit, default c): "
+        ).lower()
+        if not action:
+            action = "c"
+        if action == "q":
+            print("Quitting.")
+            return False
+        elif action == "s":
+            print("Skipping.")
+            return True
+        elif action == "c":
+            result = _handle_categorize(
+                transaction,
+                matching_order,
+                original_memo,
+                memo_generator,
+                ynab_client,
+                category_completer,
+                category_name_map,
+                category_id_map,
+            )
+            if result == "done":
+                return True
+            # result == "continue" means back to action prompt
+            continue
+        else:
+            print("Invalid action. Choose 'c', 's', or 'q'.")
+
+
+def _handle_categorize(
+    transaction: dict[str, Any],
+    matching_order: Order | dict[str, Any] | None,
+    original_memo: str,
+    memo_generator: MemoGenerator,
+    ynab_client: YNABClient,
+    category_completer: CategoryCompleter,
+    category_name_map: dict[str, str],
+    category_id_map: dict[str, str],
+) -> str:
+    """Handle the categorize action for a transaction.
+
+    Returns "done" if the transaction was successfully updated (or split completed),
+    or "continue" to go back to the action prompt.
+    """
+    transaction_id = transaction["id"]
+    updated_payload_dict: dict[str, Any] | None = None
+
+    # Check if we should offer splitting
+    should_offer_split = False
+    if matching_order:
+        if isinstance(matching_order, Order):
+            should_offer_split = bool(
+                matching_order.items and len(matching_order.items) > 1
+            )
+        else:
+            items = matching_order.get("items", [])
+            should_offer_split = bool(items and len(items) > 1)
+
+    if should_offer_split:
+        print("There is more than one item in this transaction.")
+
+    split_decision = input("Split this transaction? (y/n, default n): ").lower()
+
+    if split_decision != "y":
+        # --- SINGLE CATEGORY ---
+        print("Enter category name for the transaction:")
+        category_id, _category_name = prompt_for_category_selection(
+            category_completer, category_name_map
+        )
+        if category_id is None:
+            return "continue"
+
+        memo_input = resolve_memo(matching_order, original_memo, memo_generator)
+
+        updated_payload_dict = build_single_payload(
+            transaction,
+            category_id,
+            memo_input if memo_input else original_memo,
+        )
+    else:
+        # --- SPLITTING ---
+        subtransactions = handle_split(
+            transaction,
+            matching_order,
+            memo_generator,
+            category_completer,
+            category_name_map,
+        )
+        if subtransactions:
+            updated_payload_dict = build_split_payload(
+                transaction, subtransactions, matching_order, original_memo
+            )
+        else:
+            print("Splitting cancelled. No changes will be made.")
+
+    # --- Confirmation and API Call ---
+    if updated_payload_dict:
+        print("\n--- Preview Update ---")
+        preview_dict = build_preview(updated_payload_dict, category_id_map)
+        print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
+        confirm = input("Confirm update? (y/n, default y): ").lower()
+        if not confirm:
+            confirm = "y"
+        if confirm == "y":
+            if ynab_client.update_transaction(transaction_id, updated_payload_dict):
+                print("Update successful.")
+                return "done"
+            else:
+                logger.error("Failed to update transaction %s.", transaction_id)
+                print("Update failed.")
+                return "continue"
+        else:
+            print("Update cancelled.")
+            return "continue"
+
+    return "continue"
+
+
 # --- Main Script Logic ---
 
 
 def main() -> None:
     """Main CLI function."""
+    logging.basicConfig(level=logging.INFO)
+
     # Load configuration using extracted Config class
     try:
         config = Config.from_env()
         print_config_summary(config)
     except Exception as e:
-        print(f"ERROR: {e}")
+        logger.error("Configuration error: %s", e)
         print("Please set environment variables or create a .env file.")
         print("See README.md for setup instructions.")
         exit(1)
@@ -417,9 +857,6 @@ def main() -> None:
     category_completer_instance = CategoryCompleter(categories_list)
     print(f"\nFound {len(categories_list)} usable categories. Completion enabled.")
 
-    # Setup history for memo input (optional, but can be nice)
-    os.path.join(os.path.expanduser("~"), ".ynab_amazon_memo_history")
-
     # Ask user if they want to provide Amazon orders data for automatic item detection
     print("\n--- Optional: Amazon Orders Data ---")
     print(
@@ -436,7 +873,7 @@ def main() -> None:
         parsed_orders = prompt_for_amazon_orders_data()
         if parsed_orders:
             print(f"✓ Parsed {len(parsed_orders)} orders from Amazon data")
-            for order in parsed_orders[:3]:  # Show first 3
+            for order in parsed_orders[:3]:
                 print(
                     f"  - Order {order.order_id}: ${getattr(order, 'total', 'N/A')} ({len(getattr(order, 'items', []))} items)"
                 )
@@ -453,402 +890,19 @@ def main() -> None:
 
     # --- Process Transactions (Main Loop) ---
     for i, t in enumerate(transactions_to_process):
-        # ... (transaction detail extraction same as v3) ...
-        transaction_id = t["id"]
-        date = t["date"]
-        payee = t.get("payee_name", "N/A")
-        amount_milliunits = t["amount"]
-        amount_float = amount_milliunits / 1000.0
-        original_memo = t.get("memo", "")
-
-        if amount_milliunits > 0:
-            print(f"Found inflow transaction: {payee} ${amount_float:.2f}")
-            process_inflow = input(
-                "Process this inflow (refund/credit)? (y/n, default n): "
-            ).lower()
-            if process_inflow != "y":
-                print("Skipping inflow transaction.")
-                continue
-
-        print(
-            f"\n--- Processing Transaction {i + 1}/{len(transactions_to_process)} ---"
+        should_continue = process_transaction(
+            t,
+            i,
+            len(transactions_to_process),
+            parsed_orders,
+            memo_generator,
+            ynab_client,
+            category_completer_instance,
+            category_name_map,
+            category_id_map,
         )
-        print(f"  ID:   {transaction_id}")
-        print(f"  Date: {date}")
-        print(f"  Payee: {payee}")
-        print(f"  Amount: {-amount_float:.2f}")
-        if original_memo:
-            print(f"  Original Memo: {original_memo}")
-
-        # Try to find matching order from parsed data and show it
-        matching_order = None
-        if parsed_orders:
-            # Use extracted transaction matcher
-            transaction_matcher = TransactionMatcher()
-            matching_order = transaction_matcher.find_matching_order(
-                amount_float, date, parsed_orders
-            )
-            if matching_order:
-                print("\n  🎯 MATCHED ORDER FOUND:")
-                if isinstance(matching_order, Order):
-                    order_id = matching_order.order_id
-                    total = matching_order.total
-                    date_str = matching_order.date_str
-                    items = matching_order.items
-                else:
-                    order_id = matching_order.get("order_id")
-                    total = matching_order.get("total")
-                    date_str = matching_order.get("date") or matching_order.get(
-                        "date_str"
-                    )
-                    items = matching_order.get("items", [])
-
-                print(f"     Order ID: {order_id}")
-                print(f"     Total: ${total if total is not None else 'N/A'}")
-                print(f"     Date: {date_str if date_str is not None else 'N/A'}")
-                order_link = memo_generator.generate_amazon_order_link(order_id)
-                print(f"     Order Link: {order_link}")
-                if items:
-                    print("     Items:")
-                    for item in items:
-                        print(f"       - {item}")
-                print()
-            else:
-                print("  ⚠ No matching order found in parsed Amazon data")
-
-        while True:  # Action loop (c, s, q)
-            action = input(
-                "Action? (c = categorize/split, s = skip, q = quit, default c): "
-            ).lower()
-            if not action:
-                action = "c"
-            if action == "q":
-                print("Quitting.")
-                exit()
-            elif action == "s":
-                print("Skipping.")
-                break  # Next transaction
-            elif action == "c":
-                # --- Categorization Logic ---
-                updated_payload_dict: dict[str, Any] | None = None
-
-                # Check if there are multiple items and suggest splitting
-                # Check if we should offer splitting
-                should_offer_split = False
-                if matching_order:
-                    if isinstance(matching_order, Order):
-                        should_offer_split = bool(
-                            matching_order.items and len(matching_order.items) > 1
-                        )
-                    else:
-                        items = matching_order.get("items", [])
-                        should_offer_split = bool(items and len(items) > 1)
-
-                if should_offer_split:
-                    print("There is more than one item in this transaction.")
-
-                split_decision = input(
-                    "Split this transaction? (y/n, default n): "
-                ).lower()
-
-                if split_decision != "y":
-                    # --- SINGLE CATEGORY ---
-                    print("Enter category name for the transaction:")
-                    category_id, category_name = prompt_for_category_selection(
-                        category_completer_instance, category_name_map
-                    )
-                    if category_id is None:
-                        continue  # Back to action prompt
-
-                    # --- ENHANCED MEMO INPUT WITH AUTOMATIC ITEM DETECTION ---
-                    item_details: (
-                        dict[str, str | int | float | list[str] | None] | None
-                    ) = None
-                    enhanced_memo = None
-
-                    # Use matched order data or prompt for manual entry
-                    if matching_order:
-                        print("Using matched order data for memo generation...")
-                        if isinstance(matching_order, Order):
-                            item_details = {
-                                "order_id": matching_order.order_id or "",
-                                "items": matching_order.items,
-                                "total": matching_order.total,
-                                "date": matching_order.date_str,
-                            }
-                        else:
-                            item_details = {
-                                "order_id": matching_order.get("order_id", ""),
-                                "items": matching_order.get("items", []),
-                                "total": matching_order.get("total"),
-                                "date": matching_order.get("date")
-                                or matching_order.get("date_str"),
-                            }
-                    else:
-                        # Ask if user wants to enter item details manually
-                        manual_entry = input(
-                            "No order match found. Enter item details manually? (y/n, default n): "
-                        ).lower()
-                        if manual_entry == "y":
-                            item_details = prompt_for_item_details()
-                        else:
-                            item_details = None
-
-                    if item_details:
-                        if isinstance(item_details, dict) and "items" in item_details:
-                            # Auto-matched order data - format as: Item Name\n Order Link
-                            items_list = item_details["items"]
-                            items_text = (
-                                items_list[0]
-                                if isinstance(items_list, list) and items_list
-                                else "Amazon Purchase"
-                            )
-                            order_id_value = item_details["order_id"]
-                            order_link = memo_generator.generate_amazon_order_link(
-                                order_id_value
-                                if isinstance(order_id_value, str)
-                                else None
-                            )
-                            enhanced_memo = (
-                                f"{items_text}\n {order_link}"
-                                if order_link
-                                else items_text
-                            )
-                        else:
-                            # Manual item details
-                            enhanced_memo = memo_generator.generate_enhanced_memo(
-                                original_memo, None, item_details
-                            )
-                    else:
-                        # No item details
-                        enhanced_memo = original_memo
-
-                    if enhanced_memo and enhanced_memo != original_memo:
-                        print("\nSuggested memo:")
-                        print(f"'{enhanced_memo}'")
-                        use_suggested = input(
-                            "Use suggested memo? (y/n, default y): "
-                        ).lower()
-                        if use_suggested != "n":
-                            memo_input = enhanced_memo
-                        else:
-                            print("Enter custom memo (multiline):")
-                            memo_input = get_multiline_input_with_custom_submit("> ")
-                            if memo_input is None:
-                                memo_input = ""
-                            else:
-                                memo_input = memo_input.strip()
-                    else:
-                        print("Enter optional memo (multiline):")
-                        memo_input = get_multiline_input_with_custom_submit("> ")
-                        if memo_input is None:
-                            memo_input = ""
-                        else:
-                            memo_input = memo_input.strip()
-                    # --- END ENHANCED MEMO INPUT ---
-
-                    updated_payload_dict = build_single_payload(
-                        t,
-                        category_id,
-                        memo_input if memo_input else original_memo,
-                    )
-
-                else:
-                    # --- SPLITTING ---
-                    print("\n--- Splitting Transaction ---")
-                    subtransactions: list[dict[str, int | str | None]] = []
-                    remaining_milliunits = amount_milliunits
-                    split_count = 1
-
-                    while remaining_milliunits != 0:
-                        print(
-                            f"\nSplit {split_count}: Amount remaining: {abs(remaining_milliunits / 1000.0):.2f}"
-                        )
-
-                        # Show which item this split is for if we have matched order data
-                        # Show which item this split is for if we have matched order data
-                        items = []
-                        if matching_order:
-                            if isinstance(matching_order, Order):
-                                items = matching_order.items or []
-                            else:
-                                items = matching_order.get("items", [])
-
-                        if items:
-                            if split_count <= len(items):
-                                print(f"Item {split_count}: {items[split_count - 1]}")
-                            else:
-                                print("Additional split for remaining items")
-
-                        print(f"Enter category name for split {split_count}:")
-                        category_id, category_name = prompt_for_category_selection(
-                            category_completer_instance, category_name_map
-                        )
-                        if category_id is None:  # User backed out
-                            print("Cancelling split process.")
-                            subtransactions = []  # Clear partial splits
-                            break  # Back to action prompt
-
-                        # Get amount for this split
-                        while True:
-                            try:
-                                max_amount = abs(remaining_milliunits / 1000.0)
-                                amount_str = input(
-                                    f"Enter amount for '{category_name}' (positive, max {max_amount:.2f}, default {max_amount:.2f}): "
-                                )
-                                if not amount_str:
-                                    amount_str = str(max_amount)
-                                split_amount_float = float(amount_str)
-                                if split_amount_float <= 0:
-                                    print("Amount must be positive.")
-                                    continue
-                                split_amount_milliunits = compute_split_amount(
-                                    split_amount_float, remaining_milliunits
-                                )
-                                if split_amount_milliunits == remaining_milliunits:
-                                    print("Amount covers remaining balance.")
-                                break  # Amount valid
-                            except ValueError as e:
-                                print(
-                                    str(e)
-                                    if str(e) != str(e).lower()
-                                    else "Invalid amount."
-                                )
-
-                        # --- ENHANCED SPLIT MEMO INPUT ---
-                        # Generate memo for each split based on matched order data
-                        split_memo: str | None = None
-                        suggested_split_memo: str = ""
-
-                        # Use the already matched order if available
-                        if matching_order:
-                            print("Using matched order data for split memo...")
-                            if isinstance(matching_order, Order):
-                                items = matching_order.items
-                                order_id = matching_order.order_id
-                            else:
-                                items = matching_order.get("items", [])
-                                order_id = matching_order.get("order_id")
-
-                            if split_count <= len(items):
-                                # Use the specific item for this split
-                                items_text = items[split_count - 1]
-                                order_link = memo_generator.generate_amazon_order_link(
-                                    order_id
-                                )
-                                suggested_split_memo = (
-                                    f"{items_text}\n {order_link}"
-                                    if order_link
-                                    else items_text
-                                )
-                            else:
-                                # Fallback for extra splits beyond available items
-                                suggested_split_memo = "Additional item"
-                        else:
-                            # Ask if user wants to enter item details manually for split
-                            manual_entry = input(
-                                "Enter item details for this split? (y/n, default n): "
-                            ).lower()
-                            if manual_entry == "y":
-                                item_details = prompt_for_item_details()
-                                if item_details:
-                                    suggested_split_memo = (
-                                        memo_generator.generate_enhanced_memo(
-                                            "", None, item_details
-                                        )
-                                    )
-
-                        # Present the memo suggestion
-                        if suggested_split_memo:
-                            print(f"Suggested memo for '{category_name}' split:")
-                            print(f"'{suggested_split_memo}'")
-                            use_suggested = input(
-                                "Use suggested memo? (y/n, default y): "
-                            ).lower()
-                            if use_suggested != "n":
-                                split_memo = suggested_split_memo
-                            else:
-                                print(
-                                    f"Enter custom memo for '{category_name}' split (multiline):"
-                                )
-                                split_memo = get_multiline_input_with_custom_submit(
-                                    "> "
-                                )
-                                if split_memo is None:
-                                    split_memo = ""
-                                else:
-                                    split_memo = split_memo.strip()
-                        else:
-                            print(
-                                f"Enter optional memo for '{category_name}' split (multiline):"
-                            )
-                            split_memo_input = get_multiline_input_with_custom_submit(
-                                "> "
-                            )
-                            split_memo = (
-                                split_memo_input.strip()
-                                if split_memo_input is not None
-                                else ""
-                            )
-                        # --- END ENHANCED SPLIT MEMO INPUT ---
-
-                        subtransactions.append(
-                            {
-                                "amount": split_amount_milliunits,
-                                "category_id": category_id,
-                                "memo": split_memo if split_memo else None,
-                            }
-                        )
-
-                        remaining_milliunits -= split_amount_milliunits
-                        split_count += 1
-
-                        if abs(remaining_milliunits) <= 1:  # Handle tiny remainder
-                            print("Remaining amount negligible.")
-                            if subtransactions:
-                                print(
-                                    f"Adjusting last split amount by {remaining_milliunits} milliunits."
-                                )
-                                subtransactions[-1]["amount"] += remaining_milliunits
-                            remaining_milliunits = 0  # Force complete
-
-                    # End of splitting loop
-                    if remaining_milliunits == 0 and subtransactions:
-                        updated_payload_dict = build_split_payload(
-                            t, subtransactions, matching_order, original_memo
-                        )
-                    else:
-                        print("Splitting cancelled. No changes will be made.")
-                        # updated_payload_dict remains None
-
-                # --- Confirmation and API Call (same as v3) ---
-                if updated_payload_dict:
-                    print("\n--- Preview Update ---")
-                    preview_dict = build_preview(updated_payload_dict, category_id_map)
-                    print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
-                    confirm = input("Confirm update? (y/n, default y): ").lower()
-                    if not confirm:
-                        confirm = "y"
-                    if confirm == "y":
-                        if ynab_client.update_transaction(
-                            transaction_id, updated_payload_dict
-                        ):
-                            print("Update successful.")
-                            break  # Exit action loop, go to next transaction
-                        else:
-                            print("Update failed.")
-                            continue  # Back to action prompt
-                    else:
-                        print("Update cancelled.")
-                        continue  # Back to action prompt
-                elif action == "c":
-                    continue  # Back to action prompt if categorization started but didn't complete
-                else:
-                    continue  # Back to action prompt
-
-            else:  # Invalid action
-                print("Invalid action. Choose 'c', 's', or 'q'.")
-                # Loop continues asking for action
+        if not should_continue:
+            exit()
 
     # End of processing loop
     print("\nFinished processing transactions.")

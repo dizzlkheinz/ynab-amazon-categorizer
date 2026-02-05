@@ -3,6 +3,8 @@
 from unittest.mock import Mock, patch
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from ynab_amazon_categorizer.ynab_client import YNABClient
 
@@ -14,21 +16,30 @@ def test_ynab_client_initialization() -> None:
     assert client.budget_id == "test_budget_id"
 
 
-@patch("ynab_amazon_categorizer.ynab_client.requests.get")
-def test_get_data_success(mock_get: Mock) -> None:
+def test_ynab_client_has_retry_adapter() -> None:
+    """Test that the session has a retry adapter configured."""
+    client = YNABClient("test_key", "test_budget")
+
+    adapter = client.session.get_adapter("https://api.ynab.com")
+    assert isinstance(adapter, HTTPAdapter)
+    retry: Retry = adapter.max_retries
+    assert retry.total == 3
+    assert retry.backoff_factor == 0.5
+    assert 429 in retry.status_forcelist
+    assert 503 in retry.status_forcelist
+
+
+def test_get_data_success() -> None:
     """Test successful YNAB API data retrieval."""
-    # Arrange
+    client = YNABClient("test_key", "test_budget")
+
     mock_response = Mock()
     mock_response.json.return_value = {"data": {"test": "data"}}
     mock_response.raise_for_status.return_value = None
-    mock_get.return_value = mock_response
 
-    client = YNABClient("test_key", "test_budget")
+    with patch.object(client.session, "get", return_value=mock_response) as mock_get:
+        result = client.get_data("/test/endpoint")
 
-    # Act
-    result = client.get_data("/test/endpoint")
-
-    # Assert
     assert result == {"test": "data"}
     mock_get.assert_called_once_with(
         "https://api.ynab.com/v1/test/endpoint",
@@ -37,35 +48,31 @@ def test_get_data_success(mock_get: Mock) -> None:
     )
 
 
-@patch("ynab_amazon_categorizer.ynab_client.requests.get")
-def test_get_data_request_error(mock_get: Mock) -> None:
+def test_get_data_request_error() -> None:
     """Test YNAB API request error handling."""
-    # Arrange
-    mock_get.side_effect = requests.exceptions.RequestException("Network error")
     client = YNABClient("test_key", "test_budget")
 
-    # Act
-    result = client.get_data("/test/endpoint")
+    with patch.object(
+        client.session,
+        "get",
+        side_effect=requests.exceptions.RequestException("Network error"),
+    ):
+        result = client.get_data("/test/endpoint")
 
-    # Assert
     assert result is None
 
 
-@patch("ynab_amazon_categorizer.ynab_client.requests.put")
-def test_update_transaction_success(mock_put: Mock) -> None:
+def test_update_transaction_success() -> None:
     """Test successful transaction update."""
-    # Arrange
-    mock_response = Mock()
-    mock_response.raise_for_status.return_value = None
-    mock_put.return_value = mock_response
-
     client = YNABClient("test_key", "test_budget")
     payload = {"memo": "test memo"}
 
-    # Act
-    result = client.update_transaction("trans_123", payload)
+    mock_response = Mock()
+    mock_response.raise_for_status.return_value = None
 
-    # Assert
+    with patch.object(client.session, "put", return_value=mock_response) as mock_put:
+        result = client.update_transaction("trans_123", payload)
+
     assert result is True
     mock_put.assert_called_once_with(
         "https://api.ynab.com/v1/budgets/test_budget/transactions/trans_123",
@@ -78,26 +85,24 @@ def test_update_transaction_success(mock_put: Mock) -> None:
     )
 
 
-@patch("ynab_amazon_categorizer.ynab_client.requests.put")
-def test_update_transaction_error(mock_put: Mock) -> None:
+def test_update_transaction_error() -> None:
     """Test transaction update error handling."""
-    # Arrange
-    mock_put.side_effect = requests.exceptions.RequestException("Update failed")
     client = YNABClient("test_key", "test_budget")
 
-    # Act
-    result = client.update_transaction("trans_123", {"memo": "test"})
+    with patch.object(
+        client.session,
+        "put",
+        side_effect=requests.exceptions.RequestException("Update failed"),
+    ):
+        result = client.update_transaction("trans_123", {"memo": "test"})
 
-    # Assert
     assert result is False
 
 
 def test_get_categories_calls_get_data() -> None:
     """Test that get_categories properly calls get_data method."""
-    # Arrange
     client = YNABClient("test_key", "test_budget")
 
-    # Mock the get_data method to return categories data
     mock_get_data = Mock(
         return_value={
             "category_groups": [
@@ -119,12 +124,22 @@ def test_get_categories_calls_get_data() -> None:
     )
     client.get_data = mock_get_data  # type: ignore[method-assign]
 
-    # Act
     categories, name_to_id, id_to_name = client.get_categories()
 
-    # Assert
     mock_get_data.assert_called_once_with("/budgets/test_budget/categories")
     assert len(categories) == 1
     assert categories[0] == ("Test Group: Test Category", "cat1")
     assert "test group: test category" in name_to_id
     assert "cat1" in id_to_name
+
+
+def test_get_categories_logs_warning_on_failure() -> None:
+    """Test that get_categories logs a warning when data fetch fails."""
+    client = YNABClient("test_key", "test_budget")
+    client.get_data = Mock(return_value=None)  # type: ignore[method-assign]
+
+    categories, name_to_id, id_to_name = client.get_categories()
+
+    assert categories == []
+    assert name_to_id == {}
+    assert id_to_name == {}

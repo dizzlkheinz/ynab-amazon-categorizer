@@ -1,8 +1,13 @@
 """YNAB API client functionality."""
 
+import logging
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
 
 
 class YNABClient:
@@ -13,12 +18,22 @@ class YNABClient:
     def __init__(self, api_key: str, budget_id: str) -> None:
         self.api_key = api_key
         self.budget_id = budget_id
+        self.session = requests.Session()
+
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def get_data(self, endpoint: str) -> dict[str, Any] | None:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
         try:
-            response = requests.get(url, headers=headers, timeout=self.TIMEOUT)
+            response = self.session.get(url, headers=headers, timeout=self.TIMEOUT)
             response.raise_for_status()
             json_res = response.json()
             return json_res.get("data")
@@ -32,7 +47,7 @@ class YNABClient:
         }
         url = f"https://api.ynab.com/v1/budgets/{self.budget_id}/transactions/{transaction_id}"
         try:
-            response = requests.put(
+            response = self.session.put(
                 url,
                 headers=headers,
                 json={"transaction": payload},
@@ -49,7 +64,7 @@ class YNABClient:
         data = self.get_data(f"/budgets/{self.budget_id}/categories")
 
         if not data or "category_groups" not in data:
-            print("Could not fetch categories.")
+            logger.warning("Could not fetch categories.")
             return [], {}, {}
 
         category_list_for_completer = []
