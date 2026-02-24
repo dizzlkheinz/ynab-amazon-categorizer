@@ -34,6 +34,8 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
         available = max_length - len(link) - 4  # 4 for "\n..\n"
         if available > 10:
             return memo[:available].rstrip() + "\n..\n" + link
+        if len(link) <= max_length:
+            return link
     # Simple truncation with ellipsis
     return memo[: max_length - 3].rstrip() + "..."
 
