@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-02-23
+
+### Fixed
+
+- Comprehensive audit fixes across all modules
+- Preserve Amazon order link in memo truncation when prefix space is too small
+
 ## [2.1.8] - 2026-02-05
 
 ### Fixed
