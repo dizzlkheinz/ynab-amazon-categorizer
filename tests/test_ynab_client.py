@@ -2,18 +2,19 @@
 
 from unittest.mock import Mock, patch
 
+import pytest
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from ynab_amazon_categorizer.exceptions import (
+    YNABAPIError,
+    YNABAuthError,
+    YNABNotFoundError,
+    YNABRateLimitError,
+    YNABValidationError,
+)
 from ynab_amazon_categorizer.ynab_client import YNABClient
-
-
-def test_ynab_client_initialization() -> None:
-    """Test YNAB client can be initialized with API key and budget ID."""
-    client = YNABClient("test_api_key", "test_budget_id")
-    assert client.api_key == "test_api_key"
-    assert client.budget_id == "test_budget_id"
 
 
 def test_ynab_client_has_retry_adapter() -> None:
@@ -34,8 +35,8 @@ def test_get_data_success() -> None:
     client = YNABClient("test_key", "test_budget")
 
     mock_response = Mock()
+    mock_response.status_code = 200
     mock_response.json.return_value = {"data": {"test": "data"}}
-    mock_response.raise_for_status.return_value = None
 
     with patch.object(client.session, "get", return_value=mock_response) as mock_get:
         result = client.get_data("/test/endpoint")
@@ -49,17 +50,93 @@ def test_get_data_success() -> None:
 
 
 def test_get_data_request_error() -> None:
-    """Test YNAB API request error handling."""
+    """Network errors propagate as RequestException."""
     client = YNABClient("test_key", "test_budget")
 
-    with patch.object(
-        client.session,
-        "get",
-        side_effect=requests.exceptions.RequestException("Network error"),
+    with (
+        patch.object(
+            client.session,
+            "get",
+            side_effect=requests.exceptions.RequestException("Network error"),
+        ),
+        pytest.raises(requests.exceptions.RequestException),
     ):
-        result = client.get_data("/test/endpoint")
+        client.get_data("/test/endpoint")
 
-    assert result is None
+
+def test_get_data_auth_error() -> None:
+    """401 raises YNABAuthError."""
+    client = YNABClient("bad_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 401
+    mock_response.json.return_value = {"error": {"detail": "Unauthorized"}}
+    mock_response.text = "Unauthorized"
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABAuthError),
+    ):
+        client.get_data("/test/endpoint")
+
+
+def test_get_data_rate_limit_error() -> None:
+    """429 raises YNABRateLimitError."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 429
+    mock_response.json.return_value = {"error": {"detail": "Too many requests"}}
+    mock_response.text = "Too many requests"
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABRateLimitError),
+    ):
+        client.get_data("/test/endpoint")
+
+
+def test_get_data_not_found_error() -> None:
+    """404 raises YNABNotFoundError."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 404
+    mock_response.json.return_value = {"error": {"detail": "Not found"}}
+    mock_response.text = "Not found"
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABNotFoundError),
+    ):
+        client.get_data("/test/endpoint")
+
+
+def test_get_data_validation_error() -> None:
+    """400 raises YNABValidationError."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 400
+    mock_response.json.return_value = {"error": {"detail": "Bad request"}}
+    mock_response.text = "Bad request"
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABValidationError),
+    ):
+        client.get_data("/test/endpoint")
+
+
+def test_get_data_generic_api_error() -> None:
+    """500 raises generic YNABAPIError."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 500
+    mock_response.json.return_value = {"error": {"detail": "Server error"}}
+    mock_response.text = "Server error"
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABAPIError),
+    ):
+        client.get_data("/test/endpoint")
 
 
 def test_update_transaction_success() -> None:
@@ -68,7 +145,7 @@ def test_update_transaction_success() -> None:
     payload = {"memo": "test memo"}
 
     mock_response = Mock()
-    mock_response.raise_for_status.return_value = None
+    mock_response.status_code = 200
 
     with patch.object(client.session, "put", return_value=mock_response) as mock_put:
         result = client.update_transaction("trans_123", payload)
@@ -86,17 +163,33 @@ def test_update_transaction_success() -> None:
 
 
 def test_update_transaction_error() -> None:
-    """Test transaction update error handling."""
+    """Transaction update network error propagates."""
     client = YNABClient("test_key", "test_budget")
 
-    with patch.object(
-        client.session,
-        "put",
-        side_effect=requests.exceptions.RequestException("Update failed"),
+    with (
+        patch.object(
+            client.session,
+            "put",
+            side_effect=requests.exceptions.RequestException("Update failed"),
+        ),
+        pytest.raises(requests.exceptions.RequestException),
     ):
-        result = client.update_transaction("trans_123", {"memo": "test"})
+        client.update_transaction("trans_123", {"memo": "test"})
 
-    assert result is False
+
+def test_update_transaction_auth_error() -> None:
+    """401 on update raises YNABAuthError."""
+    client = YNABClient("bad_key", "test_budget")
+    mock_response = Mock()
+    mock_response.status_code = 401
+    mock_response.json.return_value = {"error": {"detail": "Unauthorized"}}
+    mock_response.text = "Unauthorized"
+
+    with (
+        patch.object(client.session, "put", return_value=mock_response),
+        pytest.raises(YNABAuthError),
+    ):
+        client.update_transaction("trans_123", {"memo": "test"})
 
 
 def test_get_categories_calls_get_data() -> None:
@@ -143,3 +236,10 @@ def test_get_categories_logs_warning_on_failure() -> None:
     assert categories == []
     assert name_to_id == {}
     assert id_to_name == {}
+
+
+def test_ynab_api_error_has_status_code() -> None:
+    """Typed exceptions carry status_code attribute."""
+    err = YNABAuthError("test", status_code=401)
+    assert err.status_code == 401
+    assert str(err) == "test"

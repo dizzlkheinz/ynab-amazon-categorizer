@@ -7,7 +7,45 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .exceptions import (
+    YNABAPIError,
+    YNABAuthError,
+    YNABNotFoundError,
+    YNABRateLimitError,
+    YNABValidationError,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _raise_for_ynab_status(response: requests.Response) -> None:
+    """Raise a typed exception based on YNAB API response status code."""
+    status: int = response.status_code  # type: ignore[assignment]
+    if status < 400:
+        return
+
+    try:
+        detail = response.json().get("error", {}).get("detail", response.text)
+    except (ValueError, AttributeError):
+        detail = response.text
+
+    if status == 401 or status == 403:
+        raise YNABAuthError(
+            f"Authentication failed ({status}): {detail}", status_code=status
+        )
+    if status == 404:
+        raise YNABNotFoundError(
+            f"Resource not found ({status}): {detail}", status_code=status
+        )
+    if status == 429:
+        raise YNABRateLimitError(
+            f"Rate limit exceeded ({status}): {detail}", status_code=status
+        )
+    if status == 400:
+        raise YNABValidationError(
+            f"Validation error ({status}): {detail}", status_code=status
+        )
+    raise YNABAPIError(f"YNAB API error ({status}): {detail}", status_code=status)
 
 
 class YNABClient:
@@ -30,33 +68,48 @@ class YNABClient:
         self.session.mount("http://", adapter)
 
     def get_data(self, endpoint: str) -> dict[str, Any] | None:
+        """Fetch data from YNAB API.
+
+        Returns the 'data' dict on success, or None if the response
+        has no 'data' key.
+
+        Raises typed YNAB exceptions on HTTP errors and
+        ``requests.exceptions.RequestException`` on network failures.
+        """
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
         try:
             response = self.session.get(url, headers=headers, timeout=self.TIMEOUT)
-            response.raise_for_status()
+            _raise_for_ynab_status(response)
             json_res = response.json()
             return json_res.get("data")
-        except (requests.exceptions.RequestException, KeyError, ValueError):
+        except (YNABAPIError, requests.exceptions.RequestException):
+            raise
+        except (KeyError, ValueError) as exc:
+            logger.error("Unexpected response format from %s: %s", endpoint, exc)
             return None
 
     def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> bool:
+        """Update a YNAB transaction.
+
+        Returns True on success.
+
+        Raises typed YNAB exceptions on HTTP errors and
+        ``requests.exceptions.RequestException`` on network failures.
+        """
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         url = f"https://api.ynab.com/v1/budgets/{self.budget_id}/transactions/{transaction_id}"
-        try:
-            response = self.session.put(
-                url,
-                headers=headers,
-                json={"transaction": payload},
-                timeout=self.TIMEOUT,
-            )
-            response.raise_for_status()
-            return True
-        except requests.exceptions.RequestException:
-            return False
+        response = self.session.put(
+            url,
+            headers=headers,
+            json={"transaction": payload},
+            timeout=self.TIMEOUT,
+        )
+        _raise_for_ynab_status(response)
+        return True
 
     def get_categories(
         self,

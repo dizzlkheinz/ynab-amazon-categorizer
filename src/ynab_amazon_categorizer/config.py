@@ -30,20 +30,27 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        # Load .env file if available
+        # Load .env file if available — only search up to 5 parent levels
         if DOTENV_AVAILABLE:
-            # Look for .env file in current directory and parent directories
             env_path = Path.cwd()
-            while env_path != env_path.parent:
+            for _ in range(5):
                 env_file = env_path / ".env"
                 if env_file.exists():
                     load_dotenv(env_file)
                     break
-                env_path = env_path.parent
+                parent = env_path.parent
+                if parent == env_path:
+                    break
+                env_path = parent
 
         api_key = os.getenv("YNAB_API_KEY")
         budget_id = os.getenv("YNAB_BUDGET_ID")
-        account_id = os.getenv("YNAB_ACCOUNT_ID", "none")  # Default to "none"
+
+        raw_account_id = os.getenv("YNAB_ACCOUNT_ID", "").strip()
+        account_id: str | None = (
+            raw_account_id if raw_account_id.lower() not in ("", "none") else None
+        )
+
         amazon_domain = os.getenv("AMAZON_DOMAIN", "amazon.ca")
 
         if not api_key:
