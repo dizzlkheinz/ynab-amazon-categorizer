@@ -110,6 +110,19 @@ def test_build_single_payload() -> None:
     assert result["amount"] == -15000
 
 
+def test_build_single_payload_sanitizes_long_memo() -> None:
+    """Long memos are truncated via sanitize_memo."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    long_memo = "A" * 300
+    result = build_single_payload(transaction, "cat1", long_memo)
+    assert len(result["memo"]) <= 200
+
+
 # --- build_split_payload tests ---
 
 
@@ -138,6 +151,23 @@ def test_build_split_payload() -> None:
     assert result["approved"] is True
 
 
+def test_build_split_payload_with_order() -> None:
+    """Split payload uses order items for summary memo."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    order = Order()
+    order.items = ["Widget A", "Widget B"]
+    subtransactions = [{"amount": -10000, "category_id": "cat1", "memo": "item1"}]
+
+    result = build_split_payload(transaction, subtransactions, order, "original")
+    assert "Widget A" in result["memo"]
+    assert "Widget B" in result["memo"]
+
+
 # --- print_config_summary tests ---
 
 
@@ -146,7 +176,7 @@ def test_print_config_summary_masks_secrets(capsys: pytest.CaptureFixture[str]) 
     config = Config(
         api_key="sk-secret-api-key-12345678",
         budget_id="abcd-efgh-ijkl-mnop",
-        account_id="none",
+        account_id=None,
     )
     print_config_summary(config)
 
@@ -160,6 +190,14 @@ def test_print_config_summary_masks_secrets(capsys: pytest.CaptureFixture[str]) 
     assert "API Key: configured" in captured
     assert "mnop" in captured  # last 4 of budget_id
     assert "All accounts" in captured
+
+
+def test_print_config_summary_with_account(capsys: pytest.CaptureFixture[str]) -> None:
+    """Shows 'Account ID: configured' when account is set."""
+    config = Config(api_key="key", budget_id="budget", account_id="acct123")
+    print_config_summary(config)
+    captured = capsys.readouterr().out
+    assert "Account ID: configured" in captured
 
 
 # --- fetch_amazon_transactions tests ---
@@ -202,7 +240,7 @@ def test_fetch_amazon_transactions_filters_correctly() -> None:
             },
         ]
     }
-    config = Config(api_key="key", budget_id="budget", account_id="none")
+    config = Config(api_key="key", budget_id="budget", account_id=None)
 
     result = fetch_amazon_transactions(mock_client, config)
 
@@ -214,7 +252,7 @@ def test_fetch_amazon_transactions_empty_response() -> None:
     """Returns empty list when API returns no data."""
     mock_client = Mock()
     mock_client.get_data.return_value = None
-    config = Config(api_key="key", budget_id="budget", account_id="none")
+    config = Config(api_key="key", budget_id="budget", account_id=None)
 
     result = fetch_amazon_transactions(mock_client, config)
 
@@ -232,6 +270,31 @@ def test_fetch_amazon_transactions_with_account_id() -> None:
     mock_client.get_data.assert_called_once_with(
         "/budgets/budget/accounts/acct123/transactions"
     )
+
+
+def test_fetch_amazon_transactions_includes_manual() -> None:
+    """Manual transactions (no import_id) are now included."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = {
+        "transactions": [
+            {
+                "id": "t1",
+                "payee_name": "Amazon.com",
+                "category_id": None,
+                "cleared": "uncleared",
+                "amount": -5000,
+                "transfer_account_id": None,
+                "subtransactions": [],
+                # No import_id — manual transaction
+            },
+        ]
+    }
+    config = Config(api_key="key", budget_id="budget", account_id=None)
+
+    result = fetch_amazon_transactions(mock_client, config)
+
+    assert len(result) == 1
+    assert result[0]["id"] == "t1"
 
 
 # --- generate_split_summary_memo tests ---
@@ -279,23 +342,3 @@ def test_display_matched_order_with_order_object(
     assert "702-1234567-7654321" in captured
     assert "42.99" in captured
     assert "Test Product" in captured
-
-
-def test_display_matched_order_with_dict(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Display order details from a dict."""
-    order_dict = {
-        "order_id": "702-DICT",
-        "total": 19.99,
-        "date_str": "Feb 1, 2025",
-        "items": ["Dict Item"],
-    }
-
-    memo_gen = MemoGenerator("amazon.ca")
-    display_matched_order(order_dict, memo_gen)
-
-    captured = capsys.readouterr().out
-    assert "702-DICT" in captured
-    assert "19.99" in captured
-    assert "Dict Item" in captured

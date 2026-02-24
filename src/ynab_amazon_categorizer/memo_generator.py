@@ -1,6 +1,41 @@
 """Memo generation functionality for Amazon order transactions."""
 
+import re
 from typing import Any
+
+# YNAB memo field maximum length (API rejects longer values)
+YNAB_MEMO_MAX_LENGTH = 200
+
+
+def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
+    """Sanitize a memo string for YNAB API submission.
+
+    - Strips control characters (except newlines)
+    - Truncates to ``max_length``, preserving an Amazon order link at the
+      end when possible.
+    """
+    if not memo:
+        return ""
+
+    # Strip control characters except \n and \r
+    memo = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f]", "", memo)
+    memo = memo.strip()
+
+    if max_length <= 3:
+        return memo[:max_length]
+
+    if len(memo) <= max_length:
+        return memo
+
+    # Try to preserve the order link at the end
+    link_match = re.search(r"(https://www\.\S+)$", memo)
+    if link_match:
+        link = link_match.group(1)
+        available = max_length - len(link) - 4  # 4 for "\n..\n"
+        if available > 10:
+            return memo[:available].rstrip() + "\n..\n" + link
+    # Simple truncation with ellipsis
+    return memo[: max_length - 3].rstrip() + "..."
 
 
 class MemoGenerator:
@@ -49,4 +84,5 @@ class MemoGenerator:
         if order_link:
             memo_parts.append(f"Amazon Order: {order_link}")
 
-        return "\n\n".join(memo_parts) if memo_parts else ""
+        raw = "\n\n".join(memo_parts) if memo_parts else ""
+        return sanitize_memo(raw)

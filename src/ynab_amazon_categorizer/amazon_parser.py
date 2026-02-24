@@ -1,6 +1,12 @@
 """Amazon order parsing functionality."""
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
+
+# Maximum items to extract per order (keeps memos manageable)
+MAX_ITEMS_PER_ORDER = 10
 
 
 class Order:
@@ -17,7 +23,11 @@ class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
     def parse_orders_page(self, orders_text: str) -> list[Order]:
-        """Parse Amazon orders page text to extract order information"""
+        """Parse Amazon orders page text to extract order information.
+
+        Orders are kept even when item extraction fails (partial orders)
+        so that amount/date matching can still work.
+        """
         if not orders_text.strip():
             return []
 
@@ -25,38 +35,42 @@ class AmazonParser:
 
         # Find all order blocks using regex
         order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$(\d+\.?\d*)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
-        order_matches = re.finditer(
-            order_pattern, orders_text, re.DOTALL | re.IGNORECASE
+        order_matches = list(
+            re.finditer(order_pattern, orders_text, re.DOTALL | re.IGNORECASE)
         )
 
-        for match in order_matches:
+        for idx, match in enumerate(order_matches):
             order_date = match.group(1).strip()
             order_total = float(match.group(2))
             order_id = match.group(3)
 
             # Find the content after this order until the next order or end
             start_pos = match.end()
-            next_order = re.search(
-                r"Order placed", orders_text[start_pos:], re.IGNORECASE
-            )
-            if next_order:
-                end_pos = start_pos + next_order.start()
-                order_content = orders_text[start_pos:end_pos]
+            if idx + 1 < len(order_matches):
+                end_pos = order_matches[idx + 1].start()
             else:
-                order_content = orders_text[
-                    start_pos : start_pos + 2000
-                ]  # Take next 2000 chars
+                end_pos = len(orders_text)
+            order_content = orders_text[start_pos:end_pos]
 
             # Extract items from the order content
             items = self.extract_items_from_content(order_content)
 
-            if items:  # Only add orders that have identifiable items
-                order = Order()
-                order.order_id = order_id
-                order.total = order_total
-                order.date_str = order_date
-                order.items = items
-                orders.append(order)
+            # Always keep the order even without items (partial order)
+            order = Order()
+            order.order_id = order_id
+            order.total = order_total
+            order.date_str = order_date
+            order.items = items
+
+            if not items:
+                logger.info(
+                    "Order %s parsed without items (amount=%.2f). "
+                    "It can still match by amount/date.",
+                    order_id,
+                    order_total,
+                )
+
+            orders.append(order)
 
         return orders
 
@@ -67,7 +81,7 @@ class AmazonParser:
 
         for line in lines:
             line = line.strip()
-            if not line or len(line) < 20:
+            if not line or len(line) < 15:
                 continue
 
             # Skip common UI elements
@@ -127,14 +141,14 @@ class AmazonParser:
                 if not any(word in cleaned_line.lower() for word in skip_words):
                     items.append(cleaned_line)
 
-        # Remove duplicates and limit items
-        seen = set()
-        unique_items = []
+        # Remove duplicates, keep up to MAX_ITEMS_PER_ORDER
+        seen: set[str] = set()
+        unique_items: list[str] = []
         for item in items:
             if item not in seen and len(item) > 15:  # Only keep substantial items
                 seen.add(item)
                 unique_items.append(item)
-                if len(unique_items) >= 3:  # Limit to 3 items
+                if len(unique_items) >= MAX_ITEMS_PER_ORDER:
                     break
 
         return unique_items

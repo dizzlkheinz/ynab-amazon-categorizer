@@ -1,11 +1,12 @@
 import copy
 import json
 import logging
-import os  # For history file path
+import os
+import sys
 from collections.abc import Iterable
 from typing import Any
 
-# --- NEW: Import prompt_toolkit components ---
+import requests
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
@@ -13,11 +14,9 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
 from .amazon_parser import AmazonParser, Order
-
-# --- END NEW ---
-# --- Import extracted modules ---
 from .config import Config
-from .memo_generator import MemoGenerator
+from .exceptions import ConfigurationError, YNABAPIError
+from .memo_generator import MemoGenerator, sanitize_memo
 from .transaction_matcher import TransactionMatcher
 from .ynab_client import YNABClient
 
@@ -28,14 +27,6 @@ logger = logging.getLogger(__name__)
 
 AMAZON_PAYEE_KEYWORDS = ["amazon", "amzn", "amz"]
 YNAB_API_URL = "https://api.ynab.com/v1"
-
-# --- Amazon Order Link Functions ---
-
-
-# NOTE: Memo generation functions have been moved to memo_generator.py
-
-
-# NOTE: Amazon order parsing has been moved to amazon_parser.py
 
 
 def prompt_for_amazon_orders_data() -> list[Order] | None:
@@ -71,9 +62,6 @@ def prompt_for_amazon_orders_data() -> list[Order] | None:
         print("This might be due to formatting differences in the copied text.")
 
     return parsed_orders
-
-
-# NOTE: find_matching_order moved to transaction_matcher.py
 
 
 def get_multiline_input_with_custom_submit(
@@ -113,14 +101,14 @@ def generate_split_summary_memo(matching_order: Order) -> str:
 
     items = matching_order.items
     if len(items) == 1:
-        return items[0]
+        return sanitize_memo(items[0])
 
     # Format as: "2 Items:\n- Item 1\n- Item 2"
     summary = f"{len(items)} Items:"
     for item in items:
         summary += f"\n- {item}"
 
-    return summary
+    return sanitize_memo(summary)
 
 
 def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None] | None:
@@ -180,7 +168,7 @@ def print_config_summary(config: Config) -> None:
         print(f"✓ Budget ID: ...{config.budget_id[-4:]}")
     else:
         print("✓ Budget ID: configured")
-    if config.account_id and config.account_id.lower() != "none":
+    if config.account_id:
         print("✓ Account ID: configured")
     else:
         print("✓ All accounts")
@@ -252,7 +240,7 @@ def build_single_payload(
         "payee_id": transaction.get("payee_id"),
         "payee_name": transaction.get("payee_name", "N/A"),
         "category_id": category_id,
-        "memo": memo,
+        "memo": sanitize_memo(memo),
         "cleared": transaction.get("cleared"),
         "approved": True,
         "flag_color": transaction.get("flag_color"),
@@ -263,10 +251,15 @@ def build_single_payload(
 def build_split_payload(
     transaction: dict[str, Any],
     subtransactions: list[dict[str, int | str | None]],
-    matching_order: Order | dict[str, Any] | None,
+    matching_order: Order | None,
     original_memo: str,
 ) -> dict[str, Any]:
     """Build update payload for a split transaction."""
+    memo = (
+        generate_split_summary_memo(matching_order)
+        if matching_order
+        else sanitize_memo(original_memo)
+    )
     return {
         "id": transaction["id"],
         "account_id": transaction["account_id"],
@@ -275,9 +268,7 @@ def build_split_payload(
         "payee_id": transaction.get("payee_id"),
         "payee_name": transaction.get("payee_name", "N/A"),
         "category_id": None,
-        "memo": generate_split_summary_memo(matching_order)
-        if matching_order and isinstance(matching_order, Order)
-        else original_memo,
+        "memo": memo,
         "cleared": transaction.get("cleared"),
         "approved": True,
         "flag_color": transaction.get("flag_color"),
@@ -291,7 +282,7 @@ def fetch_amazon_transactions(
 ) -> list[dict[str, Any]]:
     """Fetch transactions from YNAB and filter to uncategorized Amazon ones."""
     transactions_endpoint = f"/budgets/{config.budget_id}/transactions"
-    if config.account_id and config.account_id.lower() != "none":
+    if config.account_id:
         transactions_endpoint = (
             f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
         )
@@ -319,24 +310,13 @@ def fetch_amazon_transactions(
             and t.get("amount", 0) != 0
             and t.get("transfer_account_id") is None
             and not t.get("subtransactions")
-            and t.get("import_id") is not None
         )
         if is_valid_for_processing:
             transactions_to_process.append(t)
     return transactions_to_process
 
 
-# NOTE: YNAB API functions have been moved to ynab_client.py
-
-
-# NOTE: update_ynab_transaction moved to ynab_client.py
-
-
-# NOTE: get_categories moved to ynab_client.py
-
-
 class CategoryCompleter(Completer):
-    # ... (implementation from v3) ...
     def __init__(self, category_list: list[tuple[str, str]]) -> None:
         self.categories = [name for name, _id in category_list]
         self.category_list = category_list
@@ -356,7 +336,6 @@ class CategoryCompleter(Completer):
 def prompt_for_category_selection(
     category_completer: CategoryCompleter, name_to_id_map: dict[str, str]
 ) -> tuple[str | None, str | None]:
-    # ... (implementation from v3) ...
     history_file = os.path.join(os.path.expanduser("~"), ".ynab_amazon_cat_history")
     history = FileHistory(history_file)
     while True:
@@ -394,43 +373,34 @@ def prompt_for_category_selection(
 # --- Extracted per-transaction functions ---
 
 
-def display_matched_order(
-    matching_order: Order | dict[str, Any], memo_generator: MemoGenerator
-) -> None:
+def display_matched_order(matching_order: Order, memo_generator: MemoGenerator) -> None:
     """Display matched order details to the user."""
-    if isinstance(matching_order, Order):
-        order_id = matching_order.order_id
-        total = matching_order.total
-        date_str = matching_order.date_str
-        items = matching_order.items
-    else:
-        order_id = matching_order.get("order_id")
-        total = matching_order.get("total")
-        date_str = matching_order.get("date") or matching_order.get("date_str")
-        items = matching_order.get("items", [])
-
     print("\n  🎯 MATCHED ORDER FOUND:")
-    print(f"     Order ID: {order_id}")
-    print(f"     Total: ${total if total is not None else 'N/A'}")
-    print(f"     Date: {date_str if date_str is not None else 'N/A'}")
-    order_link = memo_generator.generate_amazon_order_link(order_id)
+    print(f"     Order ID: {matching_order.order_id}")
+    print(
+        f"     Total: ${matching_order.total if matching_order.total is not None else 'N/A'}"
+    )
+    print(
+        f"     Date: {matching_order.date_str if matching_order.date_str is not None else 'N/A'}"
+    )
+    order_link = memo_generator.generate_amazon_order_link(matching_order.order_id)
     print(f"     Order Link: {order_link}")
-    if items:
+    if matching_order.items:
         print("     Items:")
-        for item in items:
+        for item in matching_order.items:
             print(f"       - {item}")
     print()
 
 
 def resolve_memo(
-    matching_order: Order | dict[str, Any] | None,
+    matching_order: Order | None,
     original_memo: str,
     memo_generator: MemoGenerator,
 ) -> str:
     """Determine the memo for a single-category transaction.
 
     Uses matched order data when available, otherwise prompts for manual entry.
-    Returns the final memo string.
+    Returns the final memo string (already sanitized).
     """
     item_details: dict[str, str | int | float | list[str] | None] | None = None
     enhanced_memo = None
@@ -438,20 +408,12 @@ def resolve_memo(
     # Use matched order data or prompt for manual entry
     if matching_order:
         print("Using matched order data for memo generation...")
-        if isinstance(matching_order, Order):
-            item_details = {
-                "order_id": matching_order.order_id or "",
-                "items": matching_order.items,
-                "total": matching_order.total,
-                "date": matching_order.date_str,
-            }
-        else:
-            item_details = {
-                "order_id": matching_order.get("order_id", ""),
-                "items": matching_order.get("items", []),
-                "total": matching_order.get("total"),
-                "date": matching_order.get("date") or matching_order.get("date_str"),
-            }
+        item_details = {
+            "order_id": matching_order.order_id or "",
+            "items": matching_order.items,
+            "total": matching_order.total,
+            "date": matching_order.date_str,
+        }
     else:
         # Ask if user wants to enter item details manually
         manual_entry = input(
@@ -490,20 +452,20 @@ def resolve_memo(
         print(f"'{enhanced_memo}'")
         use_suggested = input("Use suggested memo? (y/n, default y): ").lower()
         if use_suggested != "n":
-            return enhanced_memo
+            return sanitize_memo(enhanced_memo)
         else:
             print("Enter custom memo (multiline):")
             memo_input = get_multiline_input_with_custom_submit("> ")
-            return memo_input.strip() if memo_input else ""
+            return sanitize_memo(memo_input.strip()) if memo_input else ""
     else:
         print("Enter optional memo (multiline):")
         memo_input = get_multiline_input_with_custom_submit("> ")
-        return memo_input.strip() if memo_input else ""
+        return sanitize_memo(memo_input.strip()) if memo_input else ""
 
 
 def handle_split(
     transaction: dict[str, Any],
-    matching_order: Order | dict[str, Any] | None,
+    matching_order: Order | None,
     memo_generator: MemoGenerator,
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
@@ -524,12 +486,7 @@ def handle_split(
         )
 
         # Show which item this split is for if we have matched order data
-        items: list[str] = []
-        if matching_order:
-            if isinstance(matching_order, Order):
-                items = matching_order.items or []
-            else:
-                items = matching_order.get("items", [])
+        items: list[str] = matching_order.items if matching_order else []
 
         if items:
             if split_count <= len(items):
@@ -577,7 +534,7 @@ def handle_split(
             {
                 "amount": split_amount_milliunits,
                 "category_id": category_id,
-                "memo": split_memo if split_memo else None,
+                "memo": sanitize_memo(split_memo) if split_memo else None,
             }
         )
 
@@ -599,7 +556,7 @@ def handle_split(
 
 
 def _resolve_split_memo(
-    matching_order: Order | dict[str, Any] | None,
+    matching_order: Order | None,
     memo_generator: MemoGenerator,
     category_name: str | None,
     split_count: int,
@@ -609,12 +566,8 @@ def _resolve_split_memo(
 
     if matching_order:
         print("Using matched order data for split memo...")
-        if isinstance(matching_order, Order):
-            items = matching_order.items
-            order_id = matching_order.order_id
-        else:
-            items = matching_order.get("items", [])
-            order_id = matching_order.get("order_id")
+        items = matching_order.items
+        order_id = matching_order.order_id
 
         if split_count <= len(items):
             items_text = items[split_count - 1]
@@ -691,7 +644,7 @@ def process_transaction(
         print(f"  Original Memo: {original_memo}")
 
     # Try to find matching order from parsed data and show it
-    matching_order: Order | dict[str, Any] | None = None
+    matching_order: Order | None = None
     if parsed_orders:
         transaction_matcher = TransactionMatcher()
         matching_order = transaction_matcher.find_matching_order(
@@ -735,7 +688,7 @@ def process_transaction(
 
 def _handle_categorize(
     transaction: dict[str, Any],
-    matching_order: Order | dict[str, Any] | None,
+    matching_order: Order | None,
     original_memo: str,
     memo_generator: MemoGenerator,
     ynab_client: YNABClient,
@@ -752,15 +705,9 @@ def _handle_categorize(
     updated_payload_dict: dict[str, Any] | None = None
 
     # Check if we should offer splitting
-    should_offer_split = False
-    if matching_order:
-        if isinstance(matching_order, Order):
-            should_offer_split = bool(
-                matching_order.items and len(matching_order.items) > 1
-            )
-        else:
-            items = matching_order.get("items", [])
-            should_offer_split = bool(items and len(items) > 1)
+    should_offer_split = bool(
+        matching_order and matching_order.items and len(matching_order.items) > 1
+    )
 
     if should_offer_split:
         print("There is more than one item in this transaction.")
@@ -808,12 +755,13 @@ def _handle_categorize(
         if not confirm:
             confirm = "y"
         if confirm == "y":
-            if ynab_client.update_transaction(transaction_id, updated_payload_dict):
+            try:
+                ynab_client.update_transaction(transaction_id, updated_payload_dict)
                 print("Update successful.")
                 return "done"
-            else:
-                logger.error("Failed to update transaction %s.", transaction_id)
-                print("Update failed.")
+            except (YNABAPIError, requests.exceptions.RequestException) as exc:
+                logger.error("Failed to update transaction %s: %s", transaction_id, exc)
+                print(f"Update failed: {exc}")
                 return "continue"
         else:
             print("Update cancelled.")
@@ -833,22 +781,29 @@ def main() -> None:
     try:
         config = Config.from_env()
         print_config_summary(config)
-    except Exception as e:
+    except ConfigurationError as e:
         logger.error("Configuration error: %s", e)
         print("Please set environment variables or create a .env file.")
         print("See README.md for setup instructions.")
-        exit(1)
+        sys.exit(1)
 
     # Initialize YNAB client
     ynab_client = YNABClient(config.api_key, config.budget_id)
     memo_generator = MemoGenerator(config.amazon_domain)
 
     print("Fetching categories...")
-    categories_list, category_name_map, category_id_map = ynab_client.get_categories()
+    try:
+        categories_list, category_name_map, category_id_map = (
+            ynab_client.get_categories()
+        )
+    except (YNABAPIError, requests.exceptions.RequestException) as exc:
+        logger.error("Failed to fetch categories: %s", exc)
+        print(f"Could not fetch categories: {exc}")
+        sys.exit(1)
 
     if not categories_list:
         print("Exiting due to category fetch error or no usable categories found.")
-        exit()
+        sys.exit(1)
 
     category_completer_instance = CategoryCompleter(categories_list)
     print(f"\nFound {len(categories_list)} usable categories. Completion enabled.")
@@ -879,7 +834,13 @@ def main() -> None:
             print("No valid orders found in provided data.")
 
     print("\nFetching transactions...")
-    transactions_to_process = fetch_amazon_transactions(ynab_client, config)
+    try:
+        transactions_to_process = fetch_amazon_transactions(ynab_client, config)
+    except (YNABAPIError, requests.exceptions.RequestException) as exc:
+        logger.error("Failed to fetch transactions: %s", exc)
+        print(f"Could not fetch transactions: {exc}")
+        sys.exit(1)
+
     print(
         f"\nFound {len(transactions_to_process)} uncategorized Amazon transaction(s) needing attention."
     )
@@ -898,7 +859,7 @@ def main() -> None:
             category_id_map,
         )
         if not should_continue:
-            exit()
+            sys.exit(0)
 
     # End of processing loop
     print("\nFinished processing transactions.")
