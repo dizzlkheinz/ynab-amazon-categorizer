@@ -21,6 +21,9 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
     memo = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f]", "", memo)
     memo = memo.strip()
 
+    if max_length <= 3:
+        return memo[:max_length]
+
     if len(memo) <= max_length:
         return memo
 
