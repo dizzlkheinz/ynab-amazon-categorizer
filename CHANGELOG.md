@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-04-23
+
+### Fixed
+
+- Cancelled orders no longer cause their items to bleed into the preceding valid order
+- Quantity badge numbers (e.g. trailing ` 2`, ` 4`) are stripped from item names when the bare form also appears, without corrupting size numbers like `Size 10`
+- `"Now arriving today X:XX p.m."` delivery status lines are no longer extracted as item names
+
 ## [2.2.0] - 2026-02-23
 
 ### Fixed

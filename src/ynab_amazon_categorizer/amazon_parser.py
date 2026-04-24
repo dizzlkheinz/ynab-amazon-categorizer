@@ -22,6 +22,19 @@ class Order:
 class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
+    def _remove_cancelled_orders(self, text: str) -> str:
+        """Remove cancelled order blocks so their items don't bleed into adjacent orders."""
+        parts = re.split(r"(?=Order placed)", text)
+        kept = []
+        for part in parts:
+            if (
+                re.match(r"\s*Order placed", part)
+                and "Your order was cancelled" in part
+            ):
+                continue
+            kept.append(part)
+        return "".join(kept)
+
     def parse_orders_page(self, orders_text: str) -> list[Order]:
         """Parse Amazon orders page text to extract order information.
 
@@ -30,6 +43,8 @@ class AmazonParser:
         """
         if not orders_text.strip():
             return []
+
+        orders_text = self._remove_cancelled_orders(orders_text)
 
         orders = []
 
@@ -76,7 +91,7 @@ class AmazonParser:
 
     def extract_items_from_content(self, order_content: str) -> list[str]:
         """Extract item names from order content."""
-        items = []
+        candidates: list[str] = []
         lines = order_content.split("\n")
 
         for line in lines:
@@ -84,10 +99,10 @@ class AmazonParser:
             if not line or len(line) < 15:
                 continue
 
-            # Skip common UI elements
+            # Skip common UI elements and delivery status lines
             skip_patterns = [
                 r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
-                r"^(Delivered|Arriving|Auto-delivered|Package was)",
+                r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
                 r"^(Return items:|Return or replace)",
                 r"^\d+\.?\d* out of \d+ stars",
                 r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
@@ -139,15 +154,23 @@ class AmazonParser:
                     "shipping",
                 ]
                 if not any(word in cleaned_line.lower() for word in skip_words):
-                    items.append(cleaned_line)
+                    candidates.append(cleaned_line)
 
-        # Remove duplicates, keep up to MAX_ITEMS_PER_ORDER
+        # Build lookup set to detect quantity-badge duplicates.
+        # Amazon shows "Product Name <qty>" and "Product Name" on adjacent lines when
+        # qty > 1. We want to strip the badge only when the bare form also appears.
+        candidate_set = set(candidates)
+
         seen: set[str] = set()
         unique_items: list[str] = []
-        for item in items:
-            if item not in seen and len(item) > 15:  # Only keep substantial items
-                seen.add(item)
-                unique_items.append(item)
+        for item in candidates:
+            stripped = re.sub(r"\s+\d+$", "", item)
+            normalized = (
+                stripped if (stripped != item and stripped in candidate_set) else item
+            )
+            if normalized not in seen and len(normalized) > 15:
+                seen.add(normalized)
+                unique_items.append(normalized)
                 if len(unique_items) >= MAX_ITEMS_PER_ORDER:
                     break
 
