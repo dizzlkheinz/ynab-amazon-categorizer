@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-04-23
+
+### Fixed
+
+- Pin `ty==0.0.14` in dev dependencies so CI uses the same type-checker version as the lock file
+
 ## [2.2.1] - 2026-04-23
 
 ### Fixed
