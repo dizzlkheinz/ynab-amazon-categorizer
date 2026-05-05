@@ -222,3 +222,40 @@ Now arriving today 5:15 p.m. - 8:15 p.m.
     items = parser.extract_items_from_content(order_content)
     assert all("arriving" not in i.lower() for i in items)
     assert any("Psyllium" in i for i in items)
+
+
+def test_footer_boilerplate_not_extracted() -> None:
+    """Page footer and Amazon nav boilerplate must not appear as items."""
+    parser = AmazonParser()
+
+    order_content = """
+    Tampax Pearl Tampons, Plastic Applicator, Light Absorbency, 50 Count
+    Buy it again
+    Protect & Build Your Brand
+    Amazon.ca Rewards Mastercard
+    Registry & Gift List
+    Find, attract and engage customers
+    Interest-Based Ads
+    © 1996-2026, Amazon.com, Inc. or its affiliates
+    Amazon.com.ca ULC | 40 King Street W 47th Floor, Toronto, Ontario, Canada, M5H 3Y2
+    Influencers & Associates
+    To move between items, use your keyboard's up or down arrows.
+    """
+
+    items = parser.extract_items_from_content(order_content)
+
+    assert len(items) == 1
+    assert "Tampax" in items[0]
+    for word in [
+        "Mastercard",
+        "Registry",
+        "attract",
+        "Interest-Based",
+        "affiliates",
+        "ULC",
+        "Influencers",
+        "keyboard",
+    ]:
+        assert not any(word.lower() in item.lower() for item in items), (
+            f"Boilerplate '{word}' leaked into items"
+        )

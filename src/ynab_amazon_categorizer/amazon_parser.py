@@ -91,6 +91,15 @@ class AmazonParser:
 
     def extract_items_from_content(self, order_content: str) -> list[str]:
         """Extract item names from order content."""
+        # Trim at page footer sentinels to avoid extracting navigation/legal boilerplate
+        footer_sentinel = re.search(
+            r"©\s*\d{4}|To move between items",
+            order_content,
+            re.IGNORECASE,
+        )
+        if footer_sentinel:
+            order_content = order_content[: footer_sentinel.start()]
+
         candidates: list[str] = []
         lines = order_content.split("\n")
 
@@ -152,6 +161,11 @@ class AmazonParser:
                     "browse",
                     "prime",
                     "shipping",
+                    "mastercard",
+                    "your brand",
+                    "registry & gift",
+                    "attract and engage",
+                    "interest-based",
                 ]
                 if not any(word in cleaned_line.lower() for word in skip_words):
                     candidates.append(cleaned_line)
