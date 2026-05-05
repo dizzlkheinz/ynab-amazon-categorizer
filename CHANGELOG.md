@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-05-05
+
+### Fixed
+
+- Footer and nav boilerplate from the Amazon orders page (copyright lines, address blocks, credit card promos, accessibility hints) is no longer extracted as order items
+
 ## [2.2.2] - 2026-04-23
 
 ### Fixed

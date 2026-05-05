@@ -486,6 +486,6 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
-    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.14" },
+    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.14" },
 ]
 provides-extras = ["dev"]
