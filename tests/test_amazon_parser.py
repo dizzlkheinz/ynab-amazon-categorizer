@@ -24,6 +24,22 @@ def test_parse_simple_order() -> None:
     assert "Fancy Feast" in order.items[0]
 
 
+def test_parse_comma_formatted_total() -> None:
+    """Totals with thousands separators are parsed as the full amount."""
+    order_text = """
+    Order placed January 1, 2026
+    Total $1,234.56
+    Order # 702-8237239-1234567
+    Premium Product Name With Enough Words To Parse
+    """
+
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].total == 1234.56
+
+
 def test_parse_empty_order_text() -> None:
     """Test parsing empty order text returns empty list."""
     parser = AmazonParser()

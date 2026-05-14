@@ -49,14 +49,14 @@ class AmazonParser:
         orders = []
 
         # Find all order blocks using regex
-        order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$(\d+\.?\d*)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
+        order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
         order_matches = list(
             re.finditer(order_pattern, orders_text, re.DOTALL | re.IGNORECASE)
         )
 
         for idx, match in enumerate(order_matches):
             order_date = match.group(1).strip()
-            order_total = float(match.group(2))
+            order_total = float(match.group(2).replace(",", ""))
             order_id = match.group(3)
 
             # Find the content after this order until the next order or end

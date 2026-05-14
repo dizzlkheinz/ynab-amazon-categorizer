@@ -14,6 +14,8 @@ from ynab_amazon_categorizer.cli import (
     fetch_amazon_transactions,
     generate_split_summary_memo,
     print_config_summary,
+    process_transaction,
+    resolve_memo,
 )
 from ynab_amazon_categorizer.config import Config
 from ynab_amazon_categorizer.memo_generator import MemoGenerator
@@ -168,6 +170,23 @@ def test_build_split_payload_with_order() -> None:
     assert "Widget B" in result["memo"]
 
 
+def test_resolve_memo_keeps_all_matched_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-category matched orders keep all parsed items in the suggested memo."""
+    order = Order()
+    order.order_id = "702-1234567-7654321"
+    order.items = ["Widget A", "Widget B"]
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+
+    result = resolve_memo(order, "", MemoGenerator("amazon.com"))
+
+    assert "Widget A" in result
+    assert "Widget B" in result
+    assert "702-1234567-7654321" in result
+
+
 # --- print_config_summary tests ---
 
 
@@ -295,6 +314,42 @@ def test_fetch_amazon_transactions_includes_manual() -> None:
 
     assert len(result) == 1
     assert result[0]["id"] == "t1"
+
+
+# --- process_transaction display tests ---
+
+
+def test_process_transaction_displays_inflow_amount_without_negating(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Accepted inflows display with their actual positive sign."""
+    transaction = {
+        "id": "t1",
+        "date": "2025-01-15",
+        "payee_name": "Amazon",
+        "amount": 10000,
+        "memo": "",
+    }
+    responses = iter(["y", "s"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+
+    result = process_transaction(
+        transaction,
+        0,
+        1,
+        None,
+        MemoGenerator(),
+        Mock(),
+        Mock(),
+        {},
+        {},
+    )
+
+    captured = capsys.readouterr().out
+    assert result is True
+    assert "Found inflow transaction: Amazon $10.00" in captured
+    assert "Amount: 10.00" in captured
 
 
 # --- generate_split_summary_memo tests ---

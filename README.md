@@ -15,7 +15,7 @@ When you paste in the text from your Amazon order page:
 
 ## Prerequisites
 
-- Python 3.12+ (recommended; 3.10+ supported)
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (recommended) or standard Python tooling
 - YNAB account with API access
 

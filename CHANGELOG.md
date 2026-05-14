@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-05-13
+
+### Fixed
+
+- Order totals with thousands separators (e.g. `$1,234.56`) are now parsed correctly
+- Single-category matched orders now show all item names in the suggested memo, not just the first
+- Transaction amount is displayed with the correct sign (no spurious negation)
+
+### Changed
+
+- Minimum supported Python version clarified to 3.12+ in README and DEVELOPMENT.md
+
 ## [2.2.3] - 2026-05-05
 
 ### Fixed

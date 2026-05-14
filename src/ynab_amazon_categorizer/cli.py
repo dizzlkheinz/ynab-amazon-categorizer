@@ -427,12 +427,9 @@ def resolve_memo(
     if item_details:
         if isinstance(item_details, dict) and "items" in item_details:
             # Auto-matched order data - format as: Item Name\n Order Link
-            items_list = item_details["items"]
             items_text = (
-                items_list[0]
-                if isinstance(items_list, list) and items_list
-                else "Amazon Purchase"
-            )
+                generate_split_summary_memo(matching_order) if matching_order else ""
+            ) or "Amazon Purchase"
             order_id_value = item_details["order_id"]
             order_link = memo_generator.generate_amazon_order_link(
                 order_id_value if isinstance(order_id_value, str) else None
@@ -639,7 +636,7 @@ def process_transaction(
     print(f"  ID:   {transaction_id}")
     print(f"  Date: {date}")
     print(f"  Payee: {payee}")
-    print(f"  Amount: {-amount_float:.2f}")
+    print(f"  Amount: {amount_float:.2f}")
     if original_memo:
         print(f"  Original Memo: {original_memo}")
 
