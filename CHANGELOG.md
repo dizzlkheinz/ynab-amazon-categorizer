@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-19
+
 ### Added
 
 - `--dry-run` flag: preview every update without sending changes to YNAB
