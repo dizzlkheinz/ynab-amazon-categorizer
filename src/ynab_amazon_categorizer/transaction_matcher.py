@@ -102,3 +102,55 @@ class TransactionMatcher:
                 best_order_id = order_id
 
         return best_match
+
+    def find_confident_match(
+        self,
+        transaction_amount: float,
+        transaction_date: str,
+        parsed_orders: Sequence[Order],
+        used_order_ids: set[str] | None = None,
+        max_date_diff_days: int = 7,
+    ) -> Order | None:
+        """Return an order only when the match is unambiguous (for batch use).
+
+        Unlike ``find_matching_order``, this requires *exactly one* unused order
+        matching the amount (within 1 cent). If that order has a parseable date
+        it must be within ``max_date_diff_days`` of the transaction. Any
+        ambiguity (zero or multiple amount matches, or a far-off date) returns
+        ``None`` so batch mode never auto-applies a guess.
+        """
+        amount_abs = abs(transaction_amount)
+
+        try:
+            trans_date: datetime | None = datetime.strptime(
+                transaction_date, "%Y-%m-%d"
+            )
+        except (ValueError, TypeError):
+            trans_date = None
+
+        candidates: list[Order] = []
+        for order in parsed_orders:
+            if order.total is None:
+                continue
+            if (
+                used_order_ids
+                and order.order_id is not None
+                and order.order_id in used_order_ids
+            ):
+                continue
+            if abs(order.total - amount_abs) >= 0.01:
+                continue
+            candidates.append(order)
+
+        if len(candidates) != 1:
+            return None
+
+        order = candidates[0]
+        if trans_date and isinstance(order.date_str, str) and order.date_str:
+            try:
+                order_date = datetime.strptime(order.date_str, "%B %d, %Y")
+                if abs((trans_date - order_date).days) > max_date_diff_days:
+                    return None
+            except (ValueError, TypeError):
+                pass
+        return order

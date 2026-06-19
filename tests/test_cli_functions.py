@@ -8,6 +8,7 @@ from ynab_amazon_categorizer.amazon_parser import Order
 from ynab_amazon_categorizer.cli import (
     _handle_categorize,
     _parse_args,
+    build_memo_only_payload,
     build_preview,
     build_single_payload,
     build_split_payload,
@@ -17,6 +18,7 @@ from ynab_amazon_categorizer.cli import (
     generate_split_summary_memo,
     handle_split,
     print_config_summary,
+    process_batch,
     process_transaction,
     resolve_memo,
 )
@@ -181,7 +183,7 @@ def test_resolve_memo_keeps_all_matched_items(
     order.order_id = "702-1234567-7654321"
     order.items = ["Widget A", "Widget B"]
 
-    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    monkeypatch.setattr("ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: "")
 
     result = resolve_memo(order, "", MemoGenerator("amazon.com"))
 
@@ -335,7 +337,9 @@ def test_process_transaction_displays_inflow_amount_without_negating(
         "memo": "",
     }
     responses = iter(["y", "s"])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
 
     result = process_transaction(
         transaction,
@@ -424,7 +428,9 @@ def test_handle_split_two_even_splits(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # split-1 amount, split-1 "use suggested?", split-2 amount (default), split-2 memo
     responses = iter(["10", "", "", ""])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
 
     result = handle_split(
         {"amount": -20000}, order, MemoGenerator("amazon.com"), Mock(), {}
@@ -483,7 +489,9 @@ def test_handle_categorize_dry_run_does_not_update(
     )
     # "Split this transaction?" -> n, "Enter item details manually?" -> n
     responses = iter(["n", "n"])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
     ynab_client = Mock()
 
     result = _handle_categorize(
@@ -521,7 +529,7 @@ def test_process_transaction_marks_order_used(
     monkeypatch.setattr(
         "ynab_amazon_categorizer.cli._handle_categorize", lambda *a, **k: "done"
     )
-    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+    monkeypatch.setattr("ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: "c")
     used: set[str] = set()
     transaction = {
         "id": "t1",
@@ -556,7 +564,7 @@ def test_process_transaction_dry_run_does_not_mark_used(
     monkeypatch.setattr(
         "ynab_amazon_categorizer.cli._handle_categorize", lambda *a, **k: "done"
     )
-    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+    monkeypatch.setattr("ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: "c")
     used: set[str] = set()
     transaction = {
         "id": "t1",
@@ -582,3 +590,106 @@ def test_process_transaction_dry_run_does_not_mark_used(
 
     assert result is True
     assert used == set()
+
+
+# --- batch mode tests ---
+
+
+def test_parse_args_batch_flag() -> None:
+    """--batch sets the batch attribute; flags are independent."""
+    assert _parse_args(["--batch"]).batch is True
+    assert _parse_args([]).batch is False
+    args = _parse_args(["--batch", "--dry-run"])
+    assert args.batch is True and args.dry_run is True
+
+
+def test_build_memo_only_payload_preserves_category_and_approved() -> None:
+    """Memo-only payload changes the memo but leaves category/approved untouched."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+        "category_id": None,
+        "approved": False,
+    }
+    result = build_memo_only_payload(transaction, "Widget A\n https://example/order")
+
+    assert result["category_id"] is None
+    assert result["approved"] is False
+    assert "Widget A" in result["memo"]
+
+
+def _batch_txn(txn_id: str, amount: int) -> dict:
+    return {
+        "id": txn_id,
+        "account_id": "a1",
+        "date": "2024-01-01",
+        "amount": amount,
+        "payee_name": "Amazon",
+        "category_id": None,
+        "approved": False,
+    }
+
+
+def _batch_order(order_id: str = "702-1234567-7654321") -> Order:
+    order = Order()
+    order.order_id = order_id
+    order.total = 20.00
+    order.date_str = "January 1, 2024"
+    order.items = ["Widget A"]
+    return order
+
+
+def test_process_batch_enriches_confident_match() -> None:
+    """A confident match gets a memo-only update; category stays None."""
+    client = Mock()
+    enriched, skipped, failed = process_batch(
+        [_batch_txn("t1", -20000)],
+        [_batch_order()],
+        MemoGenerator("amazon.com"),
+        client,
+    )
+
+    assert (enriched, skipped, failed) == (1, 0, 0)
+    client.update_transaction.assert_called_once()
+    txn_id, payload = client.update_transaction.call_args[0]
+    assert txn_id == "t1"
+    assert payload["category_id"] is None
+    assert "Widget A" in payload["memo"]
+
+
+def test_process_batch_skips_ambiguous() -> None:
+    """Two same-amount orders are ambiguous, so nothing is enriched."""
+    client = Mock()
+    orders = [_batch_order("702-AAAAAAA-0000000"), _batch_order("702-BBBBBBB-0000000")]
+    enriched, skipped, failed = process_batch(
+        [_batch_txn("t1", -20000)], orders, MemoGenerator(), client
+    )
+
+    assert (enriched, skipped, failed) == (0, 1, 0)
+    client.update_transaction.assert_not_called()
+
+
+def test_process_batch_dry_run_no_api_call() -> None:
+    """Dry-run counts the enrichment but sends nothing to YNAB."""
+    client = Mock()
+    enriched, skipped, failed = process_batch(
+        [_batch_txn("t1", -20000)], [_batch_order()], MemoGenerator(), client, True
+    )
+
+    assert enriched == 1
+    client.update_transaction.assert_not_called()
+
+
+def test_process_batch_counts_failure() -> None:
+    """A failed update is counted, not raised."""
+    from ynab_amazon_categorizer.exceptions import YNABAPIError
+
+    client = Mock()
+    client.update_transaction.side_effect = YNABAPIError("boom", status_code=500)
+    enriched, skipped, failed = process_batch(
+        [_batch_txn("t1", -20000)], [_batch_order()], MemoGenerator(), client
+    )
+
+    assert (enriched, skipped, failed) == (0, 0, 1)
