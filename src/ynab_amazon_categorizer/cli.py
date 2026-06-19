@@ -1,3 +1,4 @@
+import argparse
 import copy
 import json
 import logging
@@ -611,10 +612,17 @@ def process_transaction(
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
     category_id_map: dict[str, str],
+    used_order_ids: set[str] | None = None,
+    dry_run: bool = False,
 ) -> bool:
     """Process a single transaction through the interactive flow.
 
     Returns True if processed/skipped, False if user quit.
+
+    ``used_order_ids`` accumulates the order IDs already applied to a
+    transaction so the matcher does not reuse one order for several
+    same-amount transactions. When ``dry_run`` is True no changes are sent
+    to YNAB and matched orders are not marked as used.
     """
     transaction_id = transaction["id"]
     date = transaction["date"]
@@ -645,7 +653,7 @@ def process_transaction(
     if parsed_orders:
         transaction_matcher = TransactionMatcher()
         matching_order = transaction_matcher.find_matching_order(
-            amount_float, date, parsed_orders
+            amount_float, date, parsed_orders, used_order_ids
         )
         if matching_order:
             display_matched_order(matching_order, memo_generator)
@@ -674,8 +682,19 @@ def process_transaction(
                 category_completer,
                 category_name_map,
                 category_id_map,
+                dry_run,
             )
             if result == "done":
+                # Mark the matched order as consumed so it is not reused for a
+                # later transaction of the same amount. Skip in dry-run because
+                # nothing was actually applied.
+                if (
+                    not dry_run
+                    and used_order_ids is not None
+                    and matching_order is not None
+                    and matching_order.order_id is not None
+                ):
+                    used_order_ids.add(matching_order.order_id)
                 return True
             # result == "continue" means back to action prompt
             continue
@@ -692,11 +711,14 @@ def _handle_categorize(
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
     category_id_map: dict[str, str],
+    dry_run: bool = False,
 ) -> str:
     """Handle the categorize action for a transaction.
 
     Returns "done" if the transaction was successfully updated (or split completed),
     or "continue" to go back to the action prompt.
+
+    When ``dry_run`` is True the preview is shown but no update is sent to YNAB.
     """
     transaction_id = transaction["id"]
     updated_payload_dict: dict[str, Any] | None = None
@@ -748,6 +770,9 @@ def _handle_categorize(
         print("\n--- Preview Update ---")
         preview_dict = build_preview(updated_payload_dict, category_id_map)
         print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
+        if dry_run:
+            print("[dry-run] No changes were sent to YNAB.")
+            return "done"
         confirm = input("Confirm update? (y/n, default y): ").lower()
         if not confirm:
             confirm = "y"
@@ -770,9 +795,32 @@ def _handle_categorize(
 # --- Main Script Logic ---
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="ynab-amazon-categorizer",
+        description=(
+            "Auto-categorize Amazon transactions in YNAB with item-level "
+            "memos and category suggestions."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview updates without sending any changes to YNAB.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
     """Main CLI function."""
+    args = _parse_args(argv)
+    dry_run = args.dry_run
+
     logging.basicConfig(level=logging.INFO)
+
+    if dry_run:
+        print("*** DRY RUN: no changes will be sent to YNAB. ***")
 
     # Load configuration using extracted Config class
     try:
@@ -843,6 +891,7 @@ def main() -> None:
     )
 
     # --- Process Transactions (Main Loop) ---
+    used_order_ids: set[str] = set()
     for i, t in enumerate(transactions_to_process):
         should_continue = process_transaction(
             t,
@@ -854,6 +903,8 @@ def main() -> None:
             category_completer_instance,
             category_name_map,
             category_id_map,
+            used_order_ids,
+            dry_run,
         )
         if not should_continue:
             sys.exit(0)

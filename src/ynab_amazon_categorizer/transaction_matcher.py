@@ -20,11 +20,15 @@ class TransactionMatcher:
         transaction_amount: float,
         transaction_date: str,
         parsed_orders: Sequence[Order],
+        used_order_ids: set[str] | None = None,
     ) -> Order | None:
         """Find the best matching order for a transaction.
 
         Matching requires an exact amount match (within 1 cent).
         Ties are broken by date proximity, then by order ID for determinism.
+
+        Orders whose ``order_id`` appears in ``used_order_ids`` are skipped so a
+        single order is not matched to multiple transactions of the same amount.
         """
         if not parsed_orders:
             return None
@@ -44,6 +48,13 @@ class TransactionMatcher:
 
         for order in parsed_orders:
             if order.total is None:
+                continue
+
+            if (
+                used_order_ids
+                and order.order_id is not None
+                and order.order_id in used_order_ids
+            ):
                 continue
 
             amount_diff = abs(order.total - transaction_amount_abs)

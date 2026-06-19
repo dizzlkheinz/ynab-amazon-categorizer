@@ -6,6 +6,8 @@ import pytest
 
 from ynab_amazon_categorizer.amazon_parser import Order
 from ynab_amazon_categorizer.cli import (
+    _handle_categorize,
+    _parse_args,
     build_preview,
     build_single_payload,
     build_split_payload,
@@ -13,6 +15,7 @@ from ynab_amazon_categorizer.cli import (
     display_matched_order,
     fetch_amazon_transactions,
     generate_split_summary_memo,
+    handle_split,
     print_config_summary,
     process_transaction,
     resolve_memo,
@@ -397,3 +400,185 @@ def test_display_matched_order_with_order_object(
     assert "702-1234567-7654321" in captured
     assert "42.99" in captured
     assert "Test Product" in captured
+
+
+# --- handle_split tests ---
+
+
+def _split_order() -> Order:
+    order = Order()
+    order.order_id = "702-1234567-7654321"
+    order.total = 20.00
+    order.date_str = "January 1, 2024"
+    order.items = ["Widget A", "Widget B"]
+    return order
+
+
+def test_handle_split_two_even_splits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A two-item order splits cleanly into two equal subtransactions."""
+    order = _split_order()
+    categories = iter([("cat1", "Cat One"), ("cat2", "Cat Two")])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: next(categories),
+    )
+    # split-1 amount, split-1 "use suggested?", split-2 amount (default), split-2 memo
+    responses = iter(["10", "", "", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+
+    result = handle_split(
+        {"amount": -20000}, order, MemoGenerator("amazon.com"), Mock(), {}
+    )
+
+    assert result is not None
+    assert len(result) == 2
+    assert result[0]["amount"] == -10000
+    assert result[1]["amount"] == -10000
+    assert result[0]["category_id"] == "cat1"
+    assert result[1]["category_id"] == "cat2"
+    assert "Widget A" in str(result[0]["memo"])
+    assert "Widget B" in str(result[1]["memo"])
+
+
+def test_handle_split_cancel_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Backing out of category selection cancels the whole split."""
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: (None, None),
+    )
+
+    result = handle_split(
+        {"amount": -20000}, _split_order(), MemoGenerator(), Mock(), {}
+    )
+
+    assert result is None
+
+
+# --- _parse_args / dry-run tests ---
+
+
+def test_parse_args_dry_run_flag() -> None:
+    """--dry-run sets the dry_run attribute."""
+    assert _parse_args(["--dry-run"]).dry_run is True
+    assert _parse_args([]).dry_run is False
+
+
+def test_handle_categorize_dry_run_does_not_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In dry-run mode the preview is shown but no API update is sent."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Cat One"),
+    )
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.get_multiline_input_with_custom_submit",
+        lambda *a, **k: "",
+    )
+    # "Split this transaction?" -> n, "Enter item details manually?" -> n
+    responses = iter(["n", "n"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    ynab_client = Mock()
+
+    result = _handle_categorize(
+        transaction,
+        None,
+        "",
+        MemoGenerator(),
+        ynab_client,
+        Mock(),
+        {},
+        {},
+        dry_run=True,
+    )
+
+    assert result == "done"
+    ynab_client.update_transaction.assert_not_called()
+
+
+# --- process_transaction order-consumption tests ---
+
+
+def _amount_matched_order() -> Order:
+    order = Order()
+    order.order_id = "702-CONSUME-0000000"
+    order.total = 20.00
+    order.date_str = "January 1, 2024"
+    order.items = ["Widget A"]
+    return order
+
+
+def test_process_transaction_marks_order_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successfully categorized matched order is added to used_order_ids."""
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._handle_categorize", lambda *a, **k: "done"
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+    used: set[str] = set()
+    transaction = {
+        "id": "t1",
+        "date": "2024-01-01",
+        "payee_name": "Amazon",
+        "amount": -20000,
+        "memo": "",
+    }
+
+    result = process_transaction(
+        transaction,
+        0,
+        1,
+        [_amount_matched_order()],
+        MemoGenerator(),
+        Mock(),
+        Mock(),
+        {},
+        {},
+        used,
+        False,
+    )
+
+    assert result is True
+    assert "702-CONSUME-0000000" in used
+
+
+def test_process_transaction_dry_run_does_not_mark_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In dry-run mode a matched order is NOT marked as consumed."""
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._handle_categorize", lambda *a, **k: "done"
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "c")
+    used: set[str] = set()
+    transaction = {
+        "id": "t1",
+        "date": "2024-01-01",
+        "payee_name": "Amazon",
+        "amount": -20000,
+        "memo": "",
+    }
+
+    result = process_transaction(
+        transaction,
+        0,
+        1,
+        [_amount_matched_order()],
+        MemoGenerator(),
+        Mock(),
+        Mock(),
+        {},
+        {},
+        used,
+        True,
+    )
+
+    assert result is True
+    assert used == set()

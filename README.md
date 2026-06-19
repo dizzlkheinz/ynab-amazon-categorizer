@@ -104,6 +104,18 @@ ynab-amazon-categorizer
 python -m ynab_amazon_categorizer
 ```
 
+### Dry run
+
+Use `--dry-run` to walk through the full interactive flow and preview every
+update without sending any changes to YNAB:
+
+```bash
+ynab-amazon-categorizer --dry-run
+```
+
+The tool still shows the JSON preview for each transaction but skips the API
+call, so it is safe for trying the tool out or verifying matches.
+
 ### Workflow
 1. **Provide Amazon Orders Data** (optional but recommended):
    - Copy your Amazon orders page content

@@ -29,6 +29,15 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
+
+# Test / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
 
 # IDE
 .vscode/
