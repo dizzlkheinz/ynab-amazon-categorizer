@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `--dry-run` flag: preview every update without sending changes to YNAB
+- `--batch` flag: non-interactively auto-set memos (items + order link) for confidently matched transactions, leaving categories unchanged; combine with `--dry-run` to preview
+- CI workflow running tests (Ubuntu + Windows, Python 3.12 & 3.13), lint, and type checks on every push and pull request
+
+### Changed
+
+- All interactive prompts now go through `prompt_toolkit` for consistent input handling (replaces the builtin `input()`)
+
+### Fixed
+
+- A matched Amazon order is no longer reused for multiple same-amount transactions in a single run
+- "Subscribe & Save" / delivery-management lines and refund-status lines are no longer extracted as order items
+
 ## [2.2.4] - 2026-05-13
 
 ### Fixed

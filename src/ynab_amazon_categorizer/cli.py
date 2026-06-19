@@ -1,3 +1,4 @@
+import argparse
 import copy
 import json
 import logging
@@ -90,6 +91,18 @@ def get_multiline_input_with_custom_submit(
         return None
 
 
+def _prompt_line(message: str) -> str:
+    """Read one line of input via prompt_toolkit for consistent UX.
+
+    Used in place of the builtin input function so every prompt in the tool goes
+    through prompt_toolkit (uniform rendering and key handling). Mirrors builtin
+    input semantics: returns the entered text and lets ``EOFError`` /
+    ``KeyboardInterrupt`` propagate to the caller, so existing ``.strip()`` /
+    ``.lower()`` chains on the result keep working.
+    """
+    return prompt(message)
+
+
 def generate_split_summary_memo(matching_order: Order) -> str:
     """Generate a summary memo for split transactions showing all items"""
     if (
@@ -118,13 +131,15 @@ def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None]
     item_details: dict[str, str | int | float | list[str] | None] = {}
 
     # Get item title/description
-    title = input("Enter item title/description (optional): ").strip()
+    title = _prompt_line("Enter item title/description (optional): ").strip()
     if title:
         item_details["title"] = title
 
     # Get quantity
     while True:
-        qty_input = input("Enter quantity (optional, press Enter to skip): ").strip()
+        qty_input = _prompt_line(
+            "Enter quantity (optional, press Enter to skip): "
+        ).strip()
         if not qty_input:
             break
         try:
@@ -139,7 +154,7 @@ def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None]
 
     # Get price per item
     while True:
-        price_input = input(
+        price_input = _prompt_line(
             "Enter item price (optional, press Enter to skip): "
         ).strip()
         if not price_input:
@@ -246,6 +261,37 @@ def build_single_payload(
         "flag_color": transaction.get("flag_color"),
         "import_id": transaction.get("import_id"),
     }
+
+
+def build_memo_only_payload(transaction: dict[str, Any], memo: str) -> dict[str, Any]:
+    """Build an update payload that changes only the memo.
+
+    Used by batch mode: the category and approved status are preserved exactly
+    as YNAB returned them, so the transaction stays uncategorized for later
+    review while gaining the enriched Amazon memo.
+    """
+    return {
+        "id": transaction["id"],
+        "account_id": transaction["account_id"],
+        "date": transaction["date"],
+        "amount": transaction["amount"],
+        "payee_id": transaction.get("payee_id"),
+        "payee_name": transaction.get("payee_name", "N/A"),
+        "category_id": transaction.get("category_id"),
+        "memo": sanitize_memo(memo),
+        "cleared": transaction.get("cleared"),
+        "approved": transaction.get("approved", False),
+        "flag_color": transaction.get("flag_color"),
+        "import_id": transaction.get("import_id"),
+    }
+
+
+def build_batch_memo(order: Order, memo_generator: MemoGenerator) -> str:
+    """Build the auto-enrich memo (item summary + order link) for batch mode."""
+    items_text = generate_split_summary_memo(order) or "Amazon Purchase"
+    order_link = memo_generator.generate_amazon_order_link(order.order_id)
+    raw = f"{items_text}\n {order_link}" if order_link else items_text
+    return sanitize_memo(raw)
 
 
 def build_split_payload(
@@ -416,7 +462,7 @@ def resolve_memo(
         }
     else:
         # Ask if user wants to enter item details manually
-        manual_entry = input(
+        manual_entry = _prompt_line(
             "No order match found. Enter item details manually? (y/n, default n): "
         ).lower()
         if manual_entry == "y":
@@ -447,7 +493,7 @@ def resolve_memo(
     if enhanced_memo and enhanced_memo != original_memo:
         print("\nSuggested memo:")
         print(f"'{enhanced_memo}'")
-        use_suggested = input("Use suggested memo? (y/n, default y): ").lower()
+        use_suggested = _prompt_line("Use suggested memo? (y/n, default y): ").lower()
         if use_suggested != "n":
             return sanitize_memo(enhanced_memo)
         else:
@@ -503,7 +549,7 @@ def handle_split(
         while True:
             try:
                 max_amount = abs(remaining_milliunits / 1000.0)
-                amount_str = input(
+                amount_str = _prompt_line(
                     f"Enter amount for '{category_name}' (positive, max {max_amount:.2f}, default {max_amount:.2f}): "
                 )
                 if not amount_str:
@@ -575,7 +621,7 @@ def _resolve_split_memo(
         else:
             suggested_split_memo = "Additional item"
     else:
-        manual_entry = input(
+        manual_entry = _prompt_line(
             "Enter item details for this split? (y/n, default n): "
         ).lower()
         if manual_entry == "y":
@@ -588,7 +634,7 @@ def _resolve_split_memo(
     if suggested_split_memo:
         print(f"Suggested memo for '{category_name}' split:")
         print(f"'{suggested_split_memo}'")
-        use_suggested = input("Use suggested memo? (y/n, default y): ").lower()
+        use_suggested = _prompt_line("Use suggested memo? (y/n, default y): ").lower()
         if use_suggested != "n":
             return suggested_split_memo
         else:
@@ -611,10 +657,17 @@ def process_transaction(
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
     category_id_map: dict[str, str],
+    used_order_ids: set[str] | None = None,
+    dry_run: bool = False,
 ) -> bool:
     """Process a single transaction through the interactive flow.
 
     Returns True if processed/skipped, False if user quit.
+
+    ``used_order_ids`` accumulates the order IDs already applied to a
+    transaction so the matcher does not reuse one order for several
+    same-amount transactions. When ``dry_run`` is True no changes are sent
+    to YNAB and matched orders are not marked as used.
     """
     transaction_id = transaction["id"]
     date = transaction["date"]
@@ -625,7 +678,7 @@ def process_transaction(
 
     if amount_milliunits > 0:
         print(f"Found inflow transaction: {payee} ${amount_float:.2f}")
-        process_inflow = input(
+        process_inflow = _prompt_line(
             "Process this inflow (refund/credit)? (y/n, default n): "
         ).lower()
         if process_inflow != "y":
@@ -645,7 +698,7 @@ def process_transaction(
     if parsed_orders:
         transaction_matcher = TransactionMatcher()
         matching_order = transaction_matcher.find_matching_order(
-            amount_float, date, parsed_orders
+            amount_float, date, parsed_orders, used_order_ids
         )
         if matching_order:
             display_matched_order(matching_order, memo_generator)
@@ -653,7 +706,7 @@ def process_transaction(
             print("  ⚠ No matching order found in parsed Amazon data")
 
     while True:  # Action loop (c, s, q)
-        action = input(
+        action = _prompt_line(
             "Action? (c = categorize/split, s = skip, q = quit, default c): "
         ).lower()
         if not action:
@@ -674,8 +727,19 @@ def process_transaction(
                 category_completer,
                 category_name_map,
                 category_id_map,
+                dry_run,
             )
             if result == "done":
+                # Mark the matched order as consumed so it is not reused for a
+                # later transaction of the same amount. Skip in dry-run because
+                # nothing was actually applied.
+                if (
+                    not dry_run
+                    and used_order_ids is not None
+                    and matching_order is not None
+                    and matching_order.order_id is not None
+                ):
+                    used_order_ids.add(matching_order.order_id)
                 return True
             # result == "continue" means back to action prompt
             continue
@@ -692,11 +756,14 @@ def _handle_categorize(
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
     category_id_map: dict[str, str],
+    dry_run: bool = False,
 ) -> str:
     """Handle the categorize action for a transaction.
 
     Returns "done" if the transaction was successfully updated (or split completed),
     or "continue" to go back to the action prompt.
+
+    When ``dry_run`` is True the preview is shown but no update is sent to YNAB.
     """
     transaction_id = transaction["id"]
     updated_payload_dict: dict[str, Any] | None = None
@@ -709,7 +776,7 @@ def _handle_categorize(
     if should_offer_split:
         print("There is more than one item in this transaction.")
 
-    split_decision = input("Split this transaction? (y/n, default n): ").lower()
+    split_decision = _prompt_line("Split this transaction? (y/n, default n): ").lower()
 
     if split_decision != "y":
         # --- SINGLE CATEGORY ---
@@ -748,7 +815,10 @@ def _handle_categorize(
         print("\n--- Preview Update ---")
         preview_dict = build_preview(updated_payload_dict, category_id_map)
         print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
-        confirm = input("Confirm update? (y/n, default y): ").lower()
+        if dry_run:
+            print("[dry-run] No changes were sent to YNAB.")
+            return "done"
+        confirm = _prompt_line("Confirm update? (y/n, default y): ").lower()
         if not confirm:
             confirm = "y"
         if confirm == "y":
@@ -767,12 +837,101 @@ def _handle_categorize(
     return "continue"
 
 
+# --- Batch Mode ---
+
+
+def process_batch(
+    transactions: list[dict[str, Any]],
+    parsed_orders: list[Order] | None,
+    memo_generator: MemoGenerator,
+    ynab_client: YNABClient,
+    dry_run: bool = False,
+) -> tuple[int, int, int]:
+    """Auto-enrich memos for confidently-matched transactions without prompting.
+
+    Only the memo is set (items + order link); the category is left untouched so
+    the transaction stays uncategorized for later review. Transactions with no
+    match or an ambiguous match are skipped.
+
+    Returns a ``(enriched, skipped, failed)`` tuple.
+    """
+    matcher = TransactionMatcher()
+    used_order_ids: set[str] = set()
+    enriched = skipped = failed = 0
+
+    for t in transactions:
+        amount_float = t["amount"] / 1000.0
+        order = matcher.find_confident_match(
+            amount_float, t["date"], parsed_orders or [], used_order_ids
+        )
+        if order is None:
+            skipped += 1
+            continue
+
+        memo = build_batch_memo(order, memo_generator)
+        payload = build_memo_only_payload(t, memo)
+        payee = t.get("payee_name", "N/A")
+        summary = memo.splitlines()[0] if memo else ""
+
+        if dry_run:
+            print(f"  [dry-run] would enrich {payee} ${amount_float:.2f}: {summary}")
+            if order.order_id:
+                used_order_ids.add(order.order_id)
+            enriched += 1
+            continue
+
+        try:
+            ynab_client.update_transaction(t["id"], payload)
+            print(f"  ✓ Enriched {payee} ${amount_float:.2f}: {summary}")
+            if order.order_id:
+                used_order_ids.add(order.order_id)
+            enriched += 1
+        except (YNABAPIError, requests.exceptions.RequestException) as exc:
+            logger.error("Failed to enrich transaction %s: %s", t["id"], exc)
+            print(f"  ✗ Failed to enrich {payee} ${amount_float:.2f}: {exc}")
+            failed += 1
+
+    return enriched, skipped, failed
+
+
 # --- Main Script Logic ---
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="ynab-amazon-categorizer",
+        description=(
+            "Auto-categorize Amazon transactions in YNAB with item-level "
+            "memos and category suggestions."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview updates without sending any changes to YNAB.",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help=(
+            "Non-interactive: auto-set memos (items + order link) for "
+            "confidently matched transactions and leave categories unchanged. "
+            "Combine with --dry-run to preview."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
     """Main CLI function."""
+    args = _parse_args(argv)
+    dry_run = args.dry_run
+
     logging.basicConfig(level=logging.INFO)
+
+    if dry_run:
+        print("*** DRY RUN: no changes will be sent to YNAB. ***")
 
     # Load configuration using extracted Config class
     try:
@@ -810,7 +969,7 @@ def main() -> None:
     print(
         "You can paste Amazon orders page content to automatically match transactions with order details."
     )
-    provide_orders = input(
+    provide_orders = _prompt_line(
         "Would you like to provide Amazon orders data? (y/n, default y): "
     ).lower()
     if not provide_orders:
@@ -842,7 +1001,24 @@ def main() -> None:
         f"\nFound {len(transactions_to_process)} uncategorized Amazon transaction(s) needing attention."
     )
 
+    # --- Batch Mode (non-interactive memo enrichment) ---
+    if args.batch:
+        print("\n--- Batch: auto-enriching memos for confident matches ---")
+        enriched, skipped, failed = process_batch(
+            transactions_to_process,
+            parsed_orders,
+            memo_generator,
+            ynab_client,
+            dry_run,
+        )
+        print(
+            f"\nBatch complete: {enriched} enriched, {skipped} skipped "
+            f"(no/ambiguous match), {failed} failed."
+        )
+        return
+
     # --- Process Transactions (Main Loop) ---
+    used_order_ids: set[str] = set()
     for i, t in enumerate(transactions_to_process):
         should_continue = process_transaction(
             t,
@@ -854,6 +1030,8 @@ def main() -> None:
             category_completer_instance,
             category_name_map,
             category_id_map,
+            used_order_ids,
+            dry_run,
         )
         if not should_continue:
             sys.exit(0)

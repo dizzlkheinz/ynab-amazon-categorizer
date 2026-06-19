@@ -161,6 +161,37 @@ def test_find_matching_order_negative_amount() -> None:
     assert result.total == 25.00
 
 
+def test_find_matching_order_skips_used_order() -> None:
+    """Orders already applied to a transaction are skipped via used_order_ids."""
+    matcher = TransactionMatcher()
+    order = _make_order(order_id="702-USED000-0000000", total=50.00)
+
+    # Without exclusion it matches.
+    assert matcher.find_matching_order(50.00, "2024-01-01", [order]) is not None
+
+    # Once marked used, the same order is not returned again.
+    result = matcher.find_matching_order(
+        50.00, "2024-01-01", [order], used_order_ids={"702-USED000-0000000"}
+    )
+    assert result is None
+
+
+def test_find_matching_order_used_falls_through_to_next() -> None:
+    """When the best order is used, a second same-amount order is matched instead."""
+    matcher = TransactionMatcher()
+    order_a = _make_order(order_id="702-AAAAAAA-0000000", total=50.00)
+    order_b = _make_order(order_id="702-BBBBBBB-0000000", total=50.00)
+
+    result = matcher.find_matching_order(
+        50.00,
+        "2024-01-01",
+        [order_a, order_b],
+        used_order_ids={"702-AAAAAAA-0000000"},
+    )
+    assert result is not None
+    assert result.order_id == "702-BBBBBBB-0000000"
+
+
 @pytest.mark.parametrize(
     "trans_date,order_date,expected_bonus",
     [
@@ -197,3 +228,57 @@ def test_date_proximity_scoring_tiers(
         # No bonus, so tie-break by order_id (alphabetically)
         # "702-DATED00-0000000" < "702-NODATE0-0000000"
         assert result.order_id == "702-DATED00-0000000"
+
+
+# --- find_confident_match (batch) tests ---
+
+
+def test_find_confident_match_unique() -> None:
+    """A single amount match with a close date is confident."""
+    matcher = TransactionMatcher()
+    order = _make_order(total=50.00, date_str="January 1, 2024")
+    result = matcher.find_confident_match(50.00, "2024-01-01", [order])
+    assert result is not None
+    assert result.total == 50.00
+
+
+def test_find_confident_match_ambiguous_returns_none() -> None:
+    """Two orders with the same amount are ambiguous — no confident match."""
+    matcher = TransactionMatcher()
+    o1 = _make_order(order_id="702-AAAAAAA-0000000", total=50.00)
+    o2 = _make_order(order_id="702-BBBBBBB-0000000", total=50.00)
+    assert matcher.find_confident_match(50.00, "2024-01-01", [o1, o2]) is None
+
+
+def test_find_confident_match_no_match() -> None:
+    """No amount match returns None."""
+    matcher = TransactionMatcher()
+    order = _make_order(total=50.00)
+    assert matcher.find_confident_match(99.99, "2024-01-01", [order]) is None
+
+
+def test_find_confident_match_far_date_returns_none() -> None:
+    """A unique amount match with a far-off date is not confident."""
+    matcher = TransactionMatcher()
+    order = _make_order(total=50.00, date_str="January 1, 2024")
+    assert matcher.find_confident_match(50.00, "2024-01-31", [order]) is None
+
+
+def test_find_confident_match_no_order_date_allowed() -> None:
+    """A unique amount match with no order date still counts (uniqueness is strong)."""
+    matcher = TransactionMatcher()
+    order = _make_order(total=50.00, date_str=None)
+    result = matcher.find_confident_match(50.00, "2024-01-01", [order])
+    assert result is not None
+
+
+def test_find_confident_match_excludes_used() -> None:
+    """The only candidate being already used yields no confident match."""
+    matcher = TransactionMatcher()
+    order = _make_order(order_id="702-USED000-0000000", total=50.00)
+    assert (
+        matcher.find_confident_match(
+            50.00, "2024-01-01", [order], used_order_ids={"702-USED000-0000000"}
+        )
+        is None
+    )

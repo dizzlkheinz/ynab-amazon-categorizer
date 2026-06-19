@@ -104,6 +104,37 @@ ynab-amazon-categorizer
 python -m ynab_amazon_categorizer
 ```
 
+### Dry run
+
+Use `--dry-run` to walk through the full interactive flow and preview every
+update without sending any changes to YNAB:
+
+```bash
+ynab-amazon-categorizer --dry-run
+```
+
+The tool still shows the JSON preview for each transaction but skips the API
+call, so it is safe for trying the tool out or verifying matches.
+
+### Batch mode
+
+Use `--batch` to run non-interactively: for every transaction with a single
+high-confidence order match (unique exact-amount match within ~7 days), the
+tool sets the memo (items + order link) automatically and **leaves the category
+unchanged**, so you can still review/categorize later. Transactions with no
+match or an ambiguous match are skipped.
+
+```bash
+# Preview what batch mode would enrich
+ynab-amazon-categorizer --batch --dry-run
+
+# Apply memo enrichment
+ynab-amazon-categorizer --batch
+```
+
+You still paste the Amazon orders page once when prompted; `--batch` only
+removes the per-transaction prompting.
+
 ### Workflow
 1. **Provide Amazon Orders Data** (optional but recommended):
    - Copy your Amazon orders page content

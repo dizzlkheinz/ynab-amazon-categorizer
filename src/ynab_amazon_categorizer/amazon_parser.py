@@ -112,7 +112,9 @@ class AmazonParser:
             skip_patterns = [
                 r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
                 r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
-                r"^(Return items:|Return or replace)",
+                r"^(Return items:|Return or replace|Refund issued|Refund:|Returned)",
+                r"^(Subscribe & Save|Subscribe now|Skip this delivery|Deliver every"
+                r"|Change delivery|Manage subscription|Edit delivery|Set up now)",
                 r"^\d+\.?\d* out of \d+ stars",
                 r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
                 r"^\$\d+\.\d+|\(\$\d+\.\d+",
