@@ -1,12 +1,27 @@
 """Transaction matching functionality."""
 
-import logging
 from collections.abc import Sequence
 from datetime import datetime
 
 from .amazon_parser import Order
 
-logger = logging.getLogger(__name__)
+
+def _parse_transaction_date(date_str: str) -> datetime | None:
+    """Parse transaction date in YYYY-MM-DD format."""
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_order_date(date_str: str | None) -> datetime | None:
+    """Parse order date in 'Month DD, YYYY' format."""
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str, "%B %d, %Y")
+    except (ValueError, TypeError):
+        return None
 
 
 class TransactionMatcher:
@@ -34,12 +49,7 @@ class TransactionMatcher:
             return None
 
         transaction_amount_abs = abs(transaction_amount)
-
-        # Convert transaction date to comparable format
-        try:
-            trans_date = datetime.strptime(transaction_date, "%Y-%m-%d")
-        except (ValueError, TypeError):
-            trans_date = None
+        trans_date = _parse_transaction_date(transaction_date)
 
         best_match: Order | None = None
         best_score = 0
@@ -65,9 +75,9 @@ class TransactionMatcher:
             date_diff: int | None = None
 
             # Check date proximity
-            if trans_date and isinstance(order.date_str, str) and order.date_str:
-                try:
-                    order_date = datetime.strptime(order.date_str, "%B %d, %Y")
+            if trans_date:
+                order_date = _parse_order_date(order.date_str)
+                if order_date:
                     date_diff = abs((trans_date - order_date).days)
                     if date_diff <= 1:  # Same or next day
                         score += 30
@@ -75,8 +85,6 @@ class TransactionMatcher:
                         score += 15
                     elif date_diff <= 7:  # Within a week
                         score += 5
-                except (ValueError, TypeError):
-                    pass
 
             order_id = order.order_id or ""
 
@@ -120,13 +128,7 @@ class TransactionMatcher:
         ``None`` so batch mode never auto-applies a guess.
         """
         amount_abs = abs(transaction_amount)
-
-        try:
-            trans_date: datetime | None = datetime.strptime(
-                transaction_date, "%Y-%m-%d"
-            )
-        except (ValueError, TypeError):
-            trans_date = None
+        trans_date = _parse_transaction_date(transaction_date)
 
         candidates: list[Order] = []
         for order in parsed_orders:
@@ -146,11 +148,9 @@ class TransactionMatcher:
             return None
 
         order = candidates[0]
-        if trans_date and isinstance(order.date_str, str) and order.date_str:
-            try:
-                order_date = datetime.strptime(order.date_str, "%B %d, %Y")
+        if trans_date:
+            order_date = _parse_order_date(order.date_str)
+            if order_date:
                 if abs((trans_date - order_date).days) > max_date_diff_days:
                     return None
-            except (ValueError, TypeError):
-                pass
         return order

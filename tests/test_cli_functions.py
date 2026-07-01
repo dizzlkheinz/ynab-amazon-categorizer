@@ -198,7 +198,7 @@ def test_resolve_memo_keeps_all_matched_items(
 def test_print_config_summary_masks_secrets(capsys: pytest.CaptureFixture[str]) -> None:
     """Fix #6: No API key or full budget ID appears in output."""
     config = Config(
-        api_key="sk-secret-api-key-12345678",
+        api_key="dummy-api-key-for-testing",
         budget_id="abcd-efgh-ijkl-mnop",
         account_id=None,
     )
@@ -207,7 +207,7 @@ def test_print_config_summary_masks_secrets(capsys: pytest.CaptureFixture[str]) 
     captured = capsys.readouterr().out
 
     # Must NOT contain the full API key or budget ID
-    assert "sk-secret-api-key-12345678" not in captured
+    assert "dummy-api-key-for-testing" not in captured
     assert "abcd-efgh-ijkl-mnop" not in captured
 
     # Should show masked info

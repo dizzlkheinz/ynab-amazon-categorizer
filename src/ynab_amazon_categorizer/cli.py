@@ -124,6 +124,38 @@ def generate_split_summary_memo(matching_order: Order) -> str:
     return sanitize_memo(summary)
 
 
+def _prompt_quantity() -> int | None:
+    while True:
+        qty_input = _prompt_line(
+            "Enter quantity (optional, press Enter to skip): "
+        ).strip()
+        if not qty_input:
+            return None
+        try:
+            quantity = int(qty_input)
+            if quantity > 0:
+                return quantity
+            print("Quantity must be positive.")
+        except ValueError:
+            print("Please enter a valid number.")
+
+
+def _prompt_price() -> float | None:
+    while True:
+        price_input = _prompt_line(
+            "Enter item price (optional, press Enter to skip): "
+        ).strip()
+        if not price_input:
+            return None
+        try:
+            price = float(price_input.replace("$", "").replace(",", ""))
+            if price >= 0:
+                return price
+            print("Price must be non-negative.")
+        except ValueError:
+            print("Please enter a valid price (e.g., 29.99).")
+
+
 def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None] | None:
     """Prompt user to enter item details manually"""
     print("\n--- Manual Item Details Entry ---")
@@ -136,38 +168,14 @@ def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None]
         item_details["title"] = title
 
     # Get quantity
-    while True:
-        qty_input = _prompt_line(
-            "Enter quantity (optional, press Enter to skip): "
-        ).strip()
-        if not qty_input:
-            break
-        try:
-            quantity = int(qty_input)
-            if quantity > 0:
-                item_details["quantity"] = quantity
-                break
-            else:
-                print("Quantity must be positive.")
-        except ValueError:
-            print("Please enter a valid number.")
+    quantity = _prompt_quantity()
+    if quantity is not None:
+        item_details["quantity"] = quantity
 
     # Get price per item
-    while True:
-        price_input = _prompt_line(
-            "Enter item price (optional, press Enter to skip): "
-        ).strip()
-        if not price_input:
-            break
-        try:
-            price = float(price_input.replace("$", "").replace(",", ""))
-            if price >= 0:
-                item_details["price"] = price
-                break
-            else:
-                print("Price must be non-negative.")
-        except ValueError:
-            print("Please enter a valid price (e.g., 29.99).")
+    price = _prompt_price()
+    if price is not None:
+        item_details["price"] = price
 
     return item_details if item_details else None
 
@@ -438,6 +446,67 @@ def display_matched_order(matching_order: Order, memo_generator: MemoGenerator) 
     print()
 
 
+def _get_item_details(
+    matching_order: Order | None,
+) -> dict[str, str | int | float | list[str] | None] | None:
+    if matching_order:
+        print("Using matched order data for memo generation...")
+        return {
+            "order_id": matching_order.order_id or "",
+            "items": matching_order.items,
+            "total": matching_order.total,
+            "date": matching_order.date_str,
+        }
+
+    # Ask if user wants to enter item details manually
+    manual_entry = _prompt_line(
+        "No order match found. Enter item details manually? (y/n, default n): "
+    ).lower()
+    if manual_entry == "y":
+        return prompt_for_item_details()
+    return None
+
+
+def _build_suggested_memo(
+    item_details: dict[str, str | int | float | list[str] | None] | None,
+    matching_order: Order | None,
+    original_memo: str,
+    memo_generator: MemoGenerator,
+) -> str:
+    if not item_details:
+        return original_memo
+
+    if isinstance(item_details, dict) and "items" in item_details:
+        # Auto-matched order data - format as: Item Name\n Order Link
+        items_text = (
+            generate_split_summary_memo(matching_order) if matching_order else ""
+        ) or "Amazon Purchase"
+        order_id_value = item_details["order_id"]
+        order_link = memo_generator.generate_amazon_order_link(
+            order_id_value if isinstance(order_id_value, str) else None
+        )
+        return f"{items_text}\n {order_link}" if order_link else items_text
+
+    # Manual item details
+    return memo_generator.generate_enhanced_memo(original_memo, None, item_details)
+
+
+def _prompt_memo_confirmation(suggested_memo: str, original_memo: str) -> str:
+    if suggested_memo and suggested_memo != original_memo:
+        print("\nSuggested memo:")
+        print(f"'{suggested_memo}'")
+        use_suggested = _prompt_line("Use suggested memo? (y/n, default y): ").lower()
+        if use_suggested != "n":
+            return sanitize_memo(suggested_memo)
+        print("Enter custom memo (multiline):")
+        memo_input = get_multiline_input_with_custom_submit("> ")
+        return sanitize_memo(memo_input.strip()) if memo_input else ""
+
+    print("Enter optional memo (multiline):")
+    memo_input = get_multiline_input_with_custom_submit("> ")
+    return sanitize_memo(memo_input.strip()) if memo_input else ""
+
+
 def resolve_memo(
     matching_order: Order | None,
     original_memo: str,
@@ -448,62 +517,11 @@ def resolve_memo(
     Uses matched order data when available, otherwise prompts for manual entry.
     Returns the final memo string (already sanitized).
     """
-    item_details: dict[str, str | int | float | list[str] | None] | None = None
-    enhanced_memo = None
-
-    # Use matched order data or prompt for manual entry
-    if matching_order:
-        print("Using matched order data for memo generation...")
-        item_details = {
-            "order_id": matching_order.order_id or "",
-            "items": matching_order.items,
-            "total": matching_order.total,
-            "date": matching_order.date_str,
-        }
-    else:
-        # Ask if user wants to enter item details manually
-        manual_entry = _prompt_line(
-            "No order match found. Enter item details manually? (y/n, default n): "
-        ).lower()
-        if manual_entry == "y":
-            item_details = prompt_for_item_details()
-        else:
-            item_details = None
-
-    if item_details:
-        if isinstance(item_details, dict) and "items" in item_details:
-            # Auto-matched order data - format as: Item Name\n Order Link
-            items_text = (
-                generate_split_summary_memo(matching_order) if matching_order else ""
-            ) or "Amazon Purchase"
-            order_id_value = item_details["order_id"]
-            order_link = memo_generator.generate_amazon_order_link(
-                order_id_value if isinstance(order_id_value, str) else None
-            )
-            enhanced_memo = f"{items_text}\n {order_link}" if order_link else items_text
-        else:
-            # Manual item details
-            enhanced_memo = memo_generator.generate_enhanced_memo(
-                original_memo, None, item_details
-            )
-    else:
-        # No item details
-        enhanced_memo = original_memo
-
-    if enhanced_memo and enhanced_memo != original_memo:
-        print("\nSuggested memo:")
-        print(f"'{enhanced_memo}'")
-        use_suggested = _prompt_line("Use suggested memo? (y/n, default y): ").lower()
-        if use_suggested != "n":
-            return sanitize_memo(enhanced_memo)
-        else:
-            print("Enter custom memo (multiline):")
-            memo_input = get_multiline_input_with_custom_submit("> ")
-            return sanitize_memo(memo_input.strip()) if memo_input else ""
-    else:
-        print("Enter optional memo (multiline):")
-        memo_input = get_multiline_input_with_custom_submit("> ")
-        return sanitize_memo(memo_input.strip()) if memo_input else ""
+    item_details = _get_item_details(matching_order)
+    enhanced_memo = _build_suggested_memo(
+        item_details, matching_order, original_memo, memo_generator
+    )
+    return _prompt_memo_confirmation(enhanced_memo, original_memo)
 
 
 def handle_split(
@@ -598,15 +616,11 @@ def handle_split(
     return None
 
 
-def _resolve_split_memo(
+def _get_suggested_split_memo(
     matching_order: Order | None,
     memo_generator: MemoGenerator,
-    category_name: str | None,
     split_count: int,
 ) -> str:
-    """Resolve memo for a single split within a split transaction."""
-    suggested_split_memo: str = ""
-
     if matching_order:
         print("Using matched order data for split memo...")
         items = matching_order.items
@@ -615,36 +629,48 @@ def _resolve_split_memo(
         if split_count <= len(items):
             items_text = items[split_count - 1]
             order_link = memo_generator.generate_amazon_order_link(order_id)
-            suggested_split_memo = (
-                f"{items_text}\n {order_link}" if order_link else items_text
-            )
-        else:
-            suggested_split_memo = "Additional item"
-    else:
-        manual_entry = _prompt_line(
-            "Enter item details for this split? (y/n, default n): "
-        ).lower()
-        if manual_entry == "y":
-            item_details = prompt_for_item_details()
-            if item_details:
-                suggested_split_memo = memo_generator.generate_enhanced_memo(
-                    "", None, item_details
-                )
+            return f"{items_text}\n {order_link}" if order_link else items_text
+        return "Additional item"
 
+    manual_entry = _prompt_line(
+        "Enter item details for this split? (y/n, default n): "
+    ).lower()
+    if manual_entry == "y":
+        item_details = prompt_for_item_details()
+        if item_details:
+            return memo_generator.generate_enhanced_memo("", None, item_details)
+    return ""
+
+
+def _prompt_split_memo_confirmation(
+    suggested_split_memo: str, category_name: str | None
+) -> str:
     if suggested_split_memo:
         print(f"Suggested memo for '{category_name}' split:")
         print(f"'{suggested_split_memo}'")
         use_suggested = _prompt_line("Use suggested memo? (y/n, default y): ").lower()
         if use_suggested != "n":
             return suggested_split_memo
-        else:
-            print(f"Enter custom memo for '{category_name}' split (multiline):")
-            split_memo = get_multiline_input_with_custom_submit("> ")
-            return split_memo.strip() if split_memo else ""
-    else:
-        print(f"Enter optional memo for '{category_name}' split (multiline):")
-        split_memo_input = get_multiline_input_with_custom_submit("> ")
-        return split_memo_input.strip() if split_memo_input else ""
+        print(f"Enter custom memo for '{category_name}' split (multiline):")
+        split_memo = get_multiline_input_with_custom_submit("> ")
+        return split_memo.strip() if split_memo else ""
+
+    print(f"Enter optional memo for '{category_name}' split (multiline):")
+    split_memo = get_multiline_input_with_custom_submit("> ")
+    return split_memo.strip() if split_memo else ""
+
+
+def _resolve_split_memo(
+    matching_order: Order | None,
+    memo_generator: MemoGenerator,
+    category_name: str | None,
+    split_count: int,
+) -> str:
+    """Resolve memo for a single split within a split transaction."""
+    suggested_split_memo = _get_suggested_split_memo(
+        matching_order, memo_generator, split_count
+    )
+    return _prompt_split_memo_confirmation(suggested_split_memo, category_name)
 
 
 def process_transaction(

@@ -89,94 +89,96 @@ class AmazonParser:
 
         return orders
 
-    def extract_items_from_content(self, order_content: str) -> list[str]:
-        """Extract item names from order content."""
-        # Trim at page footer sentinels to avoid extracting navigation/legal boilerplate
+    def _trim_footer(self, order_content: str) -> str:
+        """Trim at page footer sentinels to avoid extracting navigation/legal boilerplate."""
         footer_sentinel = re.search(
             r"©\s*\d{4}|To move between items",
             order_content,
             re.IGNORECASE,
         )
         if footer_sentinel:
-            order_content = order_content[: footer_sentinel.start()]
+            return order_content[: footer_sentinel.start()]
+        return order_content
 
-        candidates: list[str] = []
-        lines = order_content.split("\n")
+    def _get_valid_cleaned_item(self, line: str) -> str | None:
+        """Check if a line matches product name criteria and return the cleaned string, or None."""
+        line = line.strip()
+        if not line or len(line) < 15:
+            return None
 
-        for line in lines:
-            line = line.strip()
-            if not line or len(line) < 15:
-                continue
+        # Skip common UI elements and delivery status lines
+        skip_patterns = [
+            r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
+            r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
+            r"^(Return items:|Return or replace|Refund issued|Refund:|Returned)",
+            r"^(Subscribe & Save|Subscribe now|Skip this delivery|Deliver every"
+            r"|Change delivery|Manage subscription|Edit delivery|Set up now)",
+            r"^\d+\.?\d* out of \d+ stars",
+            r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
+            r"^\$\d+\.\d+|\(\$\d+\.\d+",
+            r"^\d+ sustainability features?$",
+            r"^[A-Z\s]+$",  # All caps lines (must be ONLY caps and spaces)
+            r"^(Ship to|Order #|View order|Invoice)",
+        ]
 
-            # Skip common UI elements and delivery status lines
-            skip_patterns = [
-                r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
-                r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
-                r"^(Return items:|Return or replace|Refund issued|Refund:|Returned)",
-                r"^(Subscribe & Save|Subscribe now|Skip this delivery|Deliver every"
-                r"|Change delivery|Manage subscription|Edit delivery|Set up now)",
-                r"^\d+\.?\d* out of \d+ stars",
-                r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
-                r"^\$\d+\.\d+|\(\$\d+\.\d+",
-                r"^\d+ sustainability features?$",
-                r"^[A-Z\s]+$",  # All caps lines (must be ONLY caps and spaces)
-                r"^(Ship to|Order #|View order|Invoice)",
-            ]
+        if any(re.match(pattern, line, re.IGNORECASE) for pattern in skip_patterns):
+            return None
 
-            if any(re.match(pattern, line, re.IGNORECASE) for pattern in skip_patterns):
-                continue
-
-            # Look for product names - they usually contain specific patterns
-            if (
-                any(
-                    word in line.lower()
-                    for word in [
-                        "pack",
-                        "count",
-                        "size",
-                        "oz",
-                        "ml",
-                        "lbs",
-                        "kg",
-                        "inch",
-                        "cm",
-                    ]
-                )
-                or re.search(
-                    r"[A-Z][a-z].*[A-Z]", line
-                )  # Mixed case indicating product names
-                or len(line.split()) >= 5
-            ):  # Long descriptive lines
-                # Clean up the line
-                cleaned_line = re.sub(r"\s+", " ", line)
-                cleaned_line = re.sub(
-                    r"^[-•]\s*", "", cleaned_line
-                )  # Remove bullet points
-
-                # Skip if it looks like navigation or common elements
-                skip_words = [
-                    "account",
-                    "orders",
-                    "cart",
-                    "search",
-                    "hello",
-                    "browse",
-                    "prime",
-                    "shipping",
-                    "mastercard",
-                    "your brand",
-                    "registry & gift",
-                    "attract and engage",
-                    "interest-based",
+        # Look for product names - they usually contain specific patterns
+        has_product_pattern = (
+            any(
+                word in line.lower()
+                for word in [
+                    "pack",
+                    "count",
+                    "size",
+                    "oz",
+                    "ml",
+                    "lbs",
+                    "kg",
+                    "inch",
+                    "cm",
                 ]
-                if not any(word in cleaned_line.lower() for word in skip_words):
-                    candidates.append(cleaned_line)
+            )
+            or re.search(
+                r"[A-Z][a-z].*[A-Z]", line
+            )  # Mixed case indicating product names
+            or len(line.split()) >= 5
+        )  # Long descriptive lines
 
-        # Build lookup set to detect quantity-badge duplicates.
+        if not has_product_pattern:
+            return None
+
+        # Clean up the line
+        cleaned_line = re.sub(r"\s+", " ", line)
+        cleaned_line = re.sub(r"^[-•]\s*", "", cleaned_line)  # Remove bullet points
+
+        # Skip if it looks like navigation or common elements
+        skip_words = [
+            "account",
+            "orders",
+            "cart",
+            "search",
+            "hello",
+            "browse",
+            "prime",
+            "shipping",
+            "mastercard",
+            "your brand",
+            "registry & gift",
+            "attract and engage",
+            "interest-based",
+        ]
+        if any(word in cleaned_line.lower() for word in skip_words):
+            return None
+
+        return cleaned_line
+
+    def _deduplicate_and_badge_filter(self, candidates: list[str]) -> list[str]:
+        """Build lookup set to detect quantity-badge duplicates and keep up to MAX_ITEMS_PER_ORDER."""
         # Amazon shows "Product Name <qty>" and "Product Name" on adjacent lines when
         # qty > 1. We want to strip the badge only when the bare form also appears.
         candidate_set = set(candidates)
-
         seen: set[str] = set()
         unique_items: list[str] = []
         for item in candidates:
@@ -189,5 +191,16 @@ class AmazonParser:
                 unique_items.append(normalized)
                 if len(unique_items) >= MAX_ITEMS_PER_ORDER:
                     break
-
         return unique_items
+
+    def extract_items_from_content(self, order_content: str) -> list[str]:
+        """Extract item names from order content."""
+        order_content = self._trim_footer(order_content)
+
+        candidates: list[str] = []
+        for line in order_content.split("\n"):
+            cleaned = self._get_valid_cleaned_item(line)
+            if cleaned:
+                candidates.append(cleaned)
+
+        return self._deduplicate_and_badge_filter(candidates)

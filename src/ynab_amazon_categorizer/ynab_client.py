@@ -111,46 +111,66 @@ class YNABClient:
         _raise_for_ynab_status(response)
         return True
 
+    def _find_internal_master_category_group_id(
+        self, category_groups: list[dict[str, Any]]
+    ) -> str | None:
+        """Find the Internal Master Category group ID to exclude it."""
+        for group in category_groups:
+            if group.get("name") == "Internal Master Category":
+                return group.get("id")
+        return None
+
+    def _process_category_group(
+        self,
+        group: dict[str, Any],
+        internal_master_id: str | None,
+        category_list: list[tuple[str, str]],
+        name_to_id: dict[str, str],
+        id_to_name: dict[str, str],
+    ) -> None:
+        """Process a category group and add its categories to the lookups."""
+        if group.get("hidden", False) or group.get("id") == internal_master_id:
+            return
+
+        group_name = group.get("name", "")
+
+        for category in group.get("categories", []):
+            if category.get("hidden", False) or category.get("deleted", False):
+                continue
+
+            category_name = category.get("name", "")
+            category_id = category.get("id", "")
+            full_category_name = f"{group_name}: {category_name}"
+
+            category_list.append((full_category_name, category_id))
+            name_to_id[full_category_name.lower()] = category_id
+            id_to_name[category_id] = full_category_name
+
     def get_categories(
         self,
     ) -> tuple[list[tuple[str, str]], dict[str, str], dict[str, str]]:
+        """Fetch categories from YNAB API and return lookups/completer list."""
         data = self.get_data(f"/budgets/{self.budget_id}/categories")
 
         if not data or "category_groups" not in data:
             logger.warning("Could not fetch categories.")
             return [], {}, {}
 
-        category_list_for_completer = []
-        name_to_id_lookup = {}
-        id_to_name_lookup = {}
-        internal_master_category_group_id = None
+        category_list_for_completer: list[tuple[str, str]] = []
+        name_to_id_lookup: dict[str, str] = {}
+        id_to_name_lookup: dict[str, str] = {}
 
-        # Find the Internal Master Category group ID to exclude it
-        for group in data["category_groups"]:
-            if group.get("name") == "Internal Master Category":
-                internal_master_category_group_id = group.get("id")
-                break
+        groups = data.get("category_groups", [])
+        internal_master_id = self._find_internal_master_category_group_id(groups)
 
         # Process all category groups
-        for group in data["category_groups"]:
-            if (
-                group.get("hidden", False)
-                or group.get("id") == internal_master_category_group_id
-            ):
-                continue
-
-            group_name = group["name"]
-
-            for category in group.get("categories", []):
-                if category.get("hidden", False) or category.get("deleted", False):
-                    continue
-
-                category_name = category["name"]
-                category_id = category["id"]
-                full_category_name = f"{group_name}: {category_name}"
-
-                category_list_for_completer.append((full_category_name, category_id))
-                name_to_id_lookup[full_category_name.lower()] = category_id
-                id_to_name_lookup[category_id] = full_category_name
+        for group in groups:
+            self._process_category_group(
+                group,
+                internal_master_id,
+                category_list_for_completer,
+                name_to_id_lookup,
+                id_to_name_lookup,
+            )
 
         return category_list_for_completer, name_to_id_lookup, id_to_name_lookup
