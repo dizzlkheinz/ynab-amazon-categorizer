@@ -651,9 +651,10 @@ def handle_split(
         while True:
             try:
                 max_amount = abs(remaining_milliunits / 1000.0)
+                max_base = max_amount / (1 + tax_rate) if tax_rate else max_amount
                 base_str = _prompt_line(
                     f"Enter base price for '{category_name}' ({tax_pct:g}% tax, "
-                    f"max {max_amount:.2f}, default {max_amount:.2f}): "
+                    f"max base ~{max_base:.2f}, blank = remaining {max_amount:.2f} as-is): "
                 ).strip()
 
                 if not base_str:

@@ -104,21 +104,6 @@ def _token_overlap(a: str, b: str) -> float:
     return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
 
 
-def _is_near_duplicate_item(a: str, b: str) -> bool:
-    """True if two item lines look like reworded titles for the same product.
-
-    Compares token sets (order-independent) rather than raw text, since the
-    alt-text/title pair for one item is usually the same words rearranged or
-    lightly reworded, not a substring/prefix of one another. Used as a
-    fallback for copy formats without the leading-space structural marker
-    (see _is_duplicate_item_pair) — on its own this threshold is set high
-    enough to avoid the false positives a lower one would risk.
-    """
-    if _differs_only_numerically(a, b):
-        return False
-    return _token_overlap(a, b) >= NEAR_DUPLICATE_JACCARD_THRESHOLD
-
-
 def _is_duplicate_item_pair(
     prev_item: str, prev_had_leading_space: bool, item: str, had_leading_space: bool
 ) -> bool:
@@ -275,7 +260,7 @@ class AmazonParser:
 
         # Skip common UI elements and delivery status lines
         skip_patterns = [
-            r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)",
+            r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)\b",
             r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
             r"^(Your package|Your order|Your item|Your shipment|Your refund"
             r"|Your replacement)\b",

@@ -393,6 +393,39 @@ def test_skip_words_do_not_false_match_inside_real_product_words() -> None:
     )
 
 
+def test_product_titles_starting_with_ui_action_words_not_skipped() -> None:
+    """Regression: the UI-boilerplate skip pattern for words like 'View',
+    'Return', 'Get', 'Write', 'Share', 'Leave', and 'Ask' matched as a line
+    *prefix* (anchored at line-start with no trailing word boundary), so a
+    real product title merely starting with one of those letter sequences
+    was silently dropped, e.g. "Viewsonic" (starts with "View"), "Writerly"
+    (starts with "Write"), "Getting Things Done" (starts with "Get").
+    """
+    parser = AmazonParser()
+
+    order_content = """
+    Viewsonic 24-inch Full HD IPS Monitor with Built-in Speakers
+    Viewsonic 24-inch Full HD IPS Monitor with Built-in Speakers
+    Buy it again
+    """
+    items = parser.extract_items_from_content(order_content)
+    assert len(items) == 1
+    assert "Viewsonic" in items[0]
+
+    assert (
+        parser.extract_items_from_content(
+            "Writerly Leather Notebook Cover for A5 Journals and Planners"
+        )
+        != []
+    )
+    assert (
+        parser.extract_items_from_content(
+            "Getting Things Done: The Art of Stress-Free Productivity Book"
+        )
+        != []
+    )
+
+
 def test_footer_boilerplate_not_extracted() -> None:
     """Page footer and Amazon nav boilerplate must not appear as items."""
     parser = AmazonParser()
