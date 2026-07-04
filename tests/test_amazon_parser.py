@@ -186,8 +186,69 @@ View order details Invoice
     assert "Psyllium" in item_text
 
 
-def test_quantity_badge_stripped_from_item_name() -> None:
-    """Trailing quantity badge numbers are removed when the bare name also appears."""
+def test_cancelled_order_detection_is_case_insensitive() -> None:
+    """An all-caps 'ORDER PLACED' / 'Your order was cancelled' header/notice
+    must still be recognized and excluded, not just the lowercase 'Order
+    placed' form."""
+    order_text = """ORDER PLACED
+June 1, 2026
+TOTAL
+$10.00
+ORDER # 111-1111111-1111111
+Your order was cancelled
+
+Order placed
+June 2, 2026
+Total
+$20.00
+Order # 222-2222222-2222222
+
+Some Real Product Name That Is Long Enough To Count As An Item Here
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].order_id == "222-2222222-2222222"
+
+
+def test_size_variant_items_kept_as_distinct_not_merged() -> None:
+    """Two items differing only by a size/model number (not a badge pair —
+    both raw lines are distinct, standalone mentions) are real separate line
+    items and must not be collapsed into one, even though they're highly
+    similar text.
+    """
+    parser = AmazonParser()
+
+    order_content = """
+    Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38
+    Return or replace items: Eligible through July 30, 2026
+    Buy it again
+    View your item
+
+    Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 36
+    Buy it again
+    View your item
+    """
+    items = parser.extract_items_from_content(order_content)
+    assert items == [
+        "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38",
+        "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 36",
+    ]
+
+
+def test_quantity_badge_expands_to_one_entry_per_unit() -> None:
+    """Trailing quantity badge numbers expand to one item entry per unit bought.
+
+
+    BEHAVIOR CHANGE: this used to collapse a "Product Name <qty>" / "Product
+    Name" badge pair down to a single item entry (see git history for the
+    prior "badge stripped" test this replaces). That hid the fact that 2+
+    units were purchased and made it impossible to split them into separate
+    line items later (e.g. two identical bottles bought in one order). The
+    bare name is now repeated once per unit instead, capped at
+    MAX_REASONABLE_BADGE_QTY.
+    """
     parser = AmazonParser()
 
     # Amazon shows "Product Name <qty>" then "Product Name" on successive lines.
@@ -201,10 +262,29 @@ def test_quantity_badge_stripped_from_item_name() -> None:
     """
 
     items = parser.extract_items_from_content(order_content)
-    assert len(items) == 2
-    assert all("454g Tub" in i or "Ketoconazole" in i for i in items)
+    # 4x TEMPTATIONS + 1x Nizoral
+    assert len(items) == 5
+    assert sum(1 for i in items if "454g Tub" in i) == 4
+    assert sum(1 for i in items if "Ketoconazole" in i) == 1
     # Bare form preserved, badge number gone
     assert not any(i.endswith(" 4") for i in items)
+
+
+def test_quantity_badge_qty_capped_at_reasonable_maximum() -> None:
+    """An implausibly large trailing number is treated as part of the title, not a badge."""
+    parser = AmazonParser()
+
+    # "500" here is meant to read as a coincidental trailing number (e.g. part of
+    # a model/style number), not "500 units purchased" — far outside any
+    # realistic bulk-buy quantity.
+    order_content = """
+    Really Long Product Title With A Trailing Number Like A Model Code 500
+    Really Long Product Title With A Trailing Number Like A Model Code
+    Buy it again
+    """
+    items = parser.extract_items_from_content(order_content)
+    assert len(items) == 1
+    assert not items[0].endswith(" 500")
 
 
 def test_size_number_not_stripped() -> None:
@@ -238,6 +318,79 @@ Now arriving today 5:15 p.m. - 8:15 p.m.
     items = parser.extract_items_from_content(order_content)
     assert all("arriving" not in i.lower() for i in items)
     assert any("Psyllium" in i for i in items)
+
+
+def test_your_package_delivery_status_skipped() -> None:
+    """'Your package was left near the front door or porch.' must not be extracted as an item.
+
+    Regression test: this delivery-status sentence was previously misidentified as a
+    product because it (a) didn't start with the literal 'Package was' the old skip
+    pattern required, and (b) contains 'pack' as a substring of 'package', which used
+    to falsely satisfy the pack-count product heuristic.
+    """
+    parser = AmazonParser()
+
+    order_content = """
+    Your package was left near the front door or porch.
+
+    Muslogy Dashboard Storage Organizer Tray Compatible with Ford Maverick 2024 2022-2023 & Hybrid XL XLT Lariat Accessories Dash Insert Tray Behind Screen Won't Fit 2025 Maverick (Black)
+    Muslogy Dashboard Storage Organizer Tray Compatible with Ford Maverick 2024 2022-2023 & Hybrid XL XLT Lariat Accessories Dash Insert Tray Behind Screen Won't Fit 2025 Maverick (Black)
+    Buy it again
+    """
+
+    items = parser.extract_items_from_content(order_content)
+    assert all("left near the front door" not in i.lower() for i in items)
+    assert any("Muslogy" in i for i in items)
+
+
+def test_package_word_does_not_false_match_pack_heuristic() -> None:
+    """A line containing 'package'/'packaging' shouldn't count as a pack-size signal."""
+    parser = AmazonParser()
+
+    # Short line, contains "package", no other product signals, under 5 words.
+    order_content = "Package was damaged"
+
+    items = parser.extract_items_from_content(order_content)
+    assert items == []
+
+
+def test_skip_words_do_not_false_match_inside_real_product_words() -> None:
+    """Regression: skip_words used plain substring matching, so a single word
+    like 'cart' silently matched inside 'Carton'/'Cartridge', dropping real
+    item lines entirely. Real example: a 3M surgical tape order parsed with
+    zero items because '12 Rolls/Carton' tripped the 'cart' skip word.
+    """
+    parser = AmazonParser()
+
+    order_content = """
+    3M(TM) Micropore(TM) Surgical Tape 1530-1, 1 IN x 10 YD (2,5cm x 9,1m), 12 Rolls/Carton
+    3M(TM) Micropore(TM) Surgical Tape 1530-1, 1 IN x 10 YD (2,5cm x 9,1m), 12 Rolls/Carton
+    Return or replace items: Eligible through July 25, 2026
+    Buy it again
+    """
+    items = parser.extract_items_from_content(order_content)
+    assert len(items) == 1
+    assert "Carton" in items[0]
+
+    # A few more single-word skip_words with the same false-positive shape.
+    assert (
+        parser.extract_items_from_content(
+            "HP 63XL Tri-Color Ink Cartridge for Inkjet Printers Genuine Original"
+        )
+        != []
+    )
+    assert (
+        parser.extract_items_from_content(
+            "A Primer on Machine Learning for Beginners Illustrated Guide Book"
+        )
+        != []
+    )
+    assert (
+        parser.extract_items_from_content(
+            "Digital Voice Recorders for Meetings and Lectures Portable USB Device"
+        )
+        != []
+    )
 
 
 def test_footer_boilerplate_not_extracted() -> None:
