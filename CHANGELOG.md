@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-07-09
+
+### Fixed
+
+- Amazon order item extraction now stops at unparsed order-like blocks and post-pagination recommendation sections, preventing unrelated page content from leaking into YNAB memos.
+
 ## [2.3.0] - 2026-06-19
 
 ### Added
