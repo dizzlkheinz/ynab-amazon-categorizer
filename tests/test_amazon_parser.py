@@ -275,3 +275,122 @@ def test_footer_boilerplate_not_extracted() -> None:
         assert not any(word.lower() in item.lower() for item in items), (
             f"Boilerplate '{word}' leaked into items"
         )
+
+
+def test_subscription_order_does_not_bleed_into_previous_order() -> None:
+    """Unparsed digital subscription blocks still terminate the previous order."""
+    order_text = """
+    Order placed
+    July 7, 2026
+    Total
+    $45.68
+    Ship to
+    Shelby and Kalman Sutker
+    Order # 701-0590458-8308219
+    View order details Invoice
+
+    Delivered 7 July
+    Package was left near the front door or porch
+
+    Natural Factors Stress Relax Kava Kava 250 mg, 60 Vegetarian Capsules,
+    Promotes Relaxation & A Sense of Calm, 30% Kavalactones, Proudly Canadian
+    Natural Factors Stress Relax Kava Kava 250 mg, 60 Vegetarian Capsules,
+    Promotes Relaxation & A Sense of Calm, 30% Kavalactones, Proudly Canadian
+    Buy it again
+    Track package
+
+    Subscription charged on
+    July 5, 2026
+    Total
+    $10.07
+    Order # D01-3004731-5334665
+    View order details Invoice
+
+    Audible Standard Plus Audiobook Subscription, 1 Month Plan
+    Audible Standard Plus Audiobook Subscription, 1 Month Plan
+    Audiobook
+
+    Write a product review
+
+    Order placed
+    July 5, 2026
+    Total
+    $10.49
+    Ship to
+    Shelby and Kalman Sutker
+    Order # 702-9401622-4821053
+    View order details Invoice
+
+    Yupik Organic Tapioca Starch 1kg, USDA Certified, Gluten-Free, GMO-Free
+    Yupik Organic Tapioca Starch 1kg, USDA Certified, Gluten-Free, GMO-Free
+    Buy it again
+    """
+
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 2
+    first_order_items = " ".join(orders[0].items)
+    assert "Natural Factors" in first_order_items
+    assert "Audible Standard Plus" not in first_order_items
+    assert "Yupik" in " ".join(orders[1].items)
+
+
+def test_recommendations_after_pagination_do_not_leak_into_last_order() -> None:
+    """Product carousels after order pagination are not part of the final order."""
+    order_text = """
+    Order placed
+    July 4, 2026
+    Total
+    $42.36
+    Ship to
+    Shelby and Kalman Sutker
+    Order # 701-5301082-7301831
+    View order details Invoice
+
+    Delivered 6 July
+    Package was left near the front door or porch
+
+    KITCHENAID Evergreen Design Series Herringbone Ribbed Soft Silicone Oven Mitts 2-Pack Set, Heat Resistant up to 500F, Deep Forest Green, 7"x14"
+    KITCHENAID Evergreen Design Series Herringbone Ribbed Soft Silicone Oven Mitts 2-Pack Set, Heat Resistant up to 500F, Deep Forest Green, 7"x14"
+    Buy it again
+    View your item
+
+    ←Previous
+    1
+    2
+    3
+    Next→
+
+    Learn more
+    $180
+    You could have saved in the past year with Amazon Business
+    Create a free business account
+    Buy it again
+
+    Huggies Goodnites Training Pants, Girls Bedwetting NightTime Underwear,
+    Size XS, 28-43 lbs, 44 Count, Giga Pack
+    Huggies Goodnites Training Pants, Girls Bedwetting NightTime Underwear,
+    Size XS, 28-43 lbs, 44 Count, Giga Pack
+    $26.98 ($0.61/count)
+    Add to Cart
+
+    Top Smart Home Products For You
+
+    Blink Outdoor 4 Wireless smart security camera, two-year battery life,
+    1080p HD day and infrared night live view
+    Blink Outdoor 4 Wireless smart security camera, two-year battery life,
+    1080p HD day and infrared night live view
+    $94.99
+    Add to Cart
+    """
+
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    item_text = " ".join(orders[0].items)
+    assert "KITCHENAID" in item_text
+    assert "Huggies" not in item_text
+    assert "Blink Outdoor" not in item_text
+    assert "Amazon Business" not in item_text

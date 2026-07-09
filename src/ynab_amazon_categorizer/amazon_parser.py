@@ -8,6 +8,26 @@ logger = logging.getLogger(__name__)
 # Maximum items to extract per order (keeps memos manageable)
 MAX_ITEMS_PER_ORDER = 10
 
+ORDER_CONTENT_BOUNDARY_PATTERN = re.compile(
+    r"^\s*(?:Order placed|Subscription charged on|Digital order placed)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+ORDER_TAIL_SENTINEL_PATTERN = re.compile(
+    r"^\s*(?:"
+    r"[←<]?\s*Previous\b.*|"
+    r"Next\s*[→>]?\s*$|"
+    r"Sponsored\s*$|"
+    r"Learn more[ \t]*(?:\r?\n)[ \t]*\$\d|"
+    r"Top .+ For You\s*$|"
+    r"Get to Know Us\s*$|"
+    r"Make Money with Us\s*$|"
+    r"Amazon Payment Products\s*$|"
+    r"Let Us Help You\s*$"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 class Order:
     """Represents a parsed Amazon order."""
@@ -59,12 +79,13 @@ class AmazonParser:
             order_total = float(match.group(2).replace(",", ""))
             order_id = match.group(3)
 
-            # Find the content after this order until the next order or end
+            # Find the content after this order until the next order-like block or end
             start_pos = match.end()
             if idx + 1 < len(order_matches):
                 end_pos = order_matches[idx + 1].start()
             else:
                 end_pos = len(orders_text)
+            end_pos = self._find_order_content_end(orders_text, start_pos, end_pos)
             order_content = orders_text[start_pos:end_pos]
 
             # Extract items from the order content
@@ -89,13 +110,26 @@ class AmazonParser:
 
         return orders
 
+    def _find_order_content_end(
+        self, orders_text: str, start_pos: int, default_end: int
+    ) -> int:
+        """Find the earliest unparsed order-like boundary before the default end."""
+        boundary = ORDER_CONTENT_BOUNDARY_PATTERN.search(
+            orders_text, start_pos, default_end
+        )
+        if boundary:
+            return boundary.start()
+        return default_end
+
     def _trim_footer(self, order_content: str) -> str:
         """Trim at page footer sentinels to avoid extracting navigation/legal boilerplate."""
-        footer_sentinel = re.search(
-            r"©\s*\d{4}|To move between items",
-            order_content,
-            re.IGNORECASE,
-        )
+        footer_sentinel = ORDER_TAIL_SENTINEL_PATTERN.search(order_content)
+        if not footer_sentinel:
+            footer_sentinel = re.search(
+                r"©\s*\d{4}|To move between items",
+                order_content,
+                re.IGNORECASE,
+            )
         if footer_sentinel:
             return order_content[: footer_sentinel.start()]
         return order_content
