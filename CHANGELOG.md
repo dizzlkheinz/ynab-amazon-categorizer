@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-07-10
+
 ### Added
 
 - `--include-reconciled` flag to also surface already-reconciled Amazon transactions
