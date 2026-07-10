@@ -85,7 +85,7 @@ def process_batch(
             ynab_client.update_transaction(transaction["id"], payload)
             print(f"  ✓ Enriched {payee} {amount_display}: {summary}")
             enriched += 1
-        except (YNABAPIError, requests.exceptions.RequestException) as exc:
+        except (YNABAPIError, requests.exceptions.RequestException, OSError) as exc:
             logger.error("Failed to enrich transaction %s: %s", transaction["id"], exc)
             print(f"  ✗ Failed to enrich {payee} {amount_display}: {exc}")
             failed += 1

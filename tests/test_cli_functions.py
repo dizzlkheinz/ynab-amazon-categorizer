@@ -8,14 +8,18 @@ import ynab_amazon_categorizer.cli as cli_module
 from ynab_amazon_categorizer.amazon_parser import Order
 from ynab_amazon_categorizer.batch import process_batch
 from ynab_amazon_categorizer.cli import (
+    _env_flag,
     _handle_categorize,
     _parse_args,
+    _tax_rate_for_category,
     build_preview,
     compute_split_amount,
     display_matched_order,
     handle_split,
+    main,
     print_config_summary,
     process_transaction,
+    prompt_for_category_selection,
     resolve_memo,
 )
 from ynab_amazon_categorizer.config import Config
@@ -348,6 +352,32 @@ def test_fetch_amazon_transactions_includes_manual() -> None:
     assert result[0]["id"] == "t1"
 
 
+def test_fetch_amazon_transactions_optionally_includes_reconciled() -> None:
+    """Reconciled Amazon transactions are returned only when requested."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = {
+        "transactions": [
+            {
+                "id": "t1",
+                "account_id": "a1",
+                "date": "2025-01-01",
+                "payee_name": "Amazon.com",
+                "category_id": None,
+                "cleared": "reconciled",
+                "amount": -5000,
+                "transfer_account_id": None,
+                "subtransactions": [],
+            }
+        ]
+    }
+    config = Config(api_key="key", budget_id="budget", account_id=None)
+
+    assert fetch_amazon_transactions(mock_client, config) == []
+    result = fetch_amazon_transactions(mock_client, config, include_reconciled=True)
+
+    assert [transaction["id"] for transaction in result] == ["t1"]
+
+
 # --- process_transaction display tests ---
 
 
@@ -533,15 +563,22 @@ def _split_order() -> Order:
 
 
 def test_handle_split_two_even_splits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A two-item order splits cleanly into two equal subtransactions."""
+    """A two-item order splits cleanly into two equal subtransactions.
+
+    Uses the '=' exact-amount prefix so this test verifies split *mechanics*
+    (categories, memos, amount bookkeeping) independent of the base-price/tax
+    calculation added later — entering a bare "10" would now be treated as a
+    pre-tax base price with tax added on top, not an exact $10.00.
+    """
     order = _split_order()
     categories = iter([("cat1", "Cat One"), ("cat2", "Cat Two")])
     monkeypatch.setattr(
         "ynab_amazon_categorizer.cli.prompt_for_category_selection",
         lambda *a, **k: next(categories),
     )
-    # split-1 amount, split-1 "use suggested?", split-2 amount (default), split-2 memo
-    responses = iter(["10", "", "", ""])
+    # split-1 amount (exact, no tax), split-1 "use suggested?", split-2 amount
+    # (default = remaining as-is), split-2 memo
+    responses = iter(["=10", "", "", ""])
     monkeypatch.setattr(
         "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
     )
@@ -859,6 +896,428 @@ def test_process_batch_counts_failure() -> None:
     assert (enriched, skipped, failed) == (0, 0, 1)
 
 
+# --- prompt_for_category_selection: double-Enter to cancel ---
+
+
+def test_category_selection_single_empty_enter_reprompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single blank Enter does not cancel — it re-prompts, and a category
+    typed afterward is still accepted."""
+    responses = iter(["", "cat one"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt", lambda *a, **k: next(responses)
+    )
+    completer = Mock()
+    completer.category_list = [("Cat One", "cat1")]
+
+    result = prompt_for_category_selection(completer, {"cat one": "cat1"})
+
+    assert result == ("cat1", "Cat One")
+
+
+def test_category_selection_two_empty_enters_cancels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two consecutive blank Enters cancel (returns None, None)."""
+    responses = iter(["", ""])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt", lambda *a, **k: next(responses)
+    )
+
+    result = prompt_for_category_selection(Mock(), {})
+
+    assert result == (None, None)
+
+
+def test_category_selection_b_cancels_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typing 'b' cancels on the first try — no double-confirmation needed
+    for an explicit 'go back' command, unlike a blank Enter."""
+    monkeypatch.setattr("ynab_amazon_categorizer.cli.prompt", lambda *a, **k: "b")
+
+    result = prompt_for_category_selection(Mock(), {})
+
+    assert result == (None, None)
+
+
+def test_category_selection_empty_streak_resets_on_typed_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An invalid (non-empty) entry between two blank Enters resets the
+    streak — it takes two *consecutive* blanks to cancel, not two total."""
+    responses = iter(["", "not-a-real-category", "", "cat one"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt", lambda *a, **k: next(responses)
+    )
+    completer = Mock()
+    completer.category_list = [("Cat One", "cat1")]
+
+    result = prompt_for_category_selection(completer, {"cat one": "cat1"})
+
+    assert result == ("cat1", "Cat One")
+
+
+# --- main(): Ctrl+C handling ---
+
+
+def test_main_wraps_keyboard_interrupt_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A KeyboardInterrupt from the workflow becomes exit code 130."""
+    monkeypatch.setattr(cli_module, "_run", Mock(side_effect=KeyboardInterrupt))
+
+    assert main([]) == 130
+    captured = capsys.readouterr().out
+    assert "Operation cancelled" in captured
+
+
+def test_main_does_not_swallow_normal_quit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A normal sys.exit(0) from the 'q' quit path is not KeyboardInterrupt
+    and must propagate through main() unmodified."""
+    monkeypatch.setattr(cli_module, "_run", Mock(side_effect=SystemExit(0)))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([])
+
+    assert exc_info.value.code == 0
+
+
+# --- _handle_categorize: OSError handling on update ---
+
+
+def test_handle_categorize_catches_oserror_on_update(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A raw OSError during the API update (e.g. the TLS/cert failure seen in
+    practice — requests raises this directly, not as a RequestException) is
+    caught and reported like other API errors, instead of crashing the whole
+    session and losing the in-progress categorization."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Cat One"),
+    )
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.get_multiline_input_with_custom_submit",
+        lambda *a, **k: "",
+    )
+    # "Split this transaction?" -> n, "Enter item details manually?" -> n,
+    # "Confirm update?" -> y
+    responses = iter(["n", "n", "y"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+    ynab_client = Mock()
+    ynab_client.update_transaction.side_effect = OSError(
+        "Could not find a suitable TLS CA certificate bundle, invalid path: x"
+    )
+
+    result = _handle_categorize(
+        transaction,
+        None,
+        "",
+        MemoGenerator(),
+        ynab_client,
+        Mock(),
+        {},
+        {},
+        dry_run=False,
+    )
+
+    assert result == "continue"
+    captured = capsys.readouterr().out
+    assert "Update failed" in captured
+    assert "TLS CA certificate" in captured
+
+
+# --- handle_split: base-price + auto tax calculation ---
+
+
+def test_handle_split_applies_default_tax_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare number entered for a split amount is treated as a pre-tax base
+    price; the default 9% tax rate is computed and added automatically."""
+    order = _split_order()
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Household"),
+    )
+    # base price "10" (+9% tax = $10.90, matching the transaction exactly),
+    # then "use suggested memo?" -> y
+    responses = iter(["10", ""])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = handle_split(
+        {"amount": -10900}, order, MemoGenerator("amazon.com"), Mock(), {}
+    )
+
+    assert result is not None
+    assert len(result) == 1
+    assert result[0]["amount"] == -10900
+
+
+def test_handle_split_applies_grocery_tax_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A category name containing 'grocery'/'groceries' uses the reduced
+    4.5% rate instead of the 9% default."""
+    order = _split_order()
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Food: Groceries"),
+    )
+    # base price "10" (+4.5% tax = $10.45, matching the transaction exactly)
+    responses = iter(["10", ""])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = handle_split(
+        {"amount": -10450}, order, MemoGenerator("amazon.com"), Mock(), {}
+    )
+
+    assert result is not None
+    assert result[0]["amount"] == -10450
+
+
+def test_handle_split_exact_override_bypasses_tax(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefixing the amount with '=' enters an exact total, with no tax
+    calculation applied — for tax-exempt items, gift cards, etc."""
+    order = _split_order()
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Household"),
+    )
+    responses = iter(["=12.34", ""])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = handle_split(
+        {"amount": -12340}, order, MemoGenerator("amazon.com"), Mock(), {}
+    )
+
+    assert result is not None
+    assert result[0]["amount"] == -12340
+
+
+def test_handle_split_blank_uses_remaining_balance_as_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blank entry uses the full remaining balance as-is (no tax added) —
+    e.g. for a final catch-all split."""
+    order = _split_order()
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Household"),
+    )
+    responses = iter(["", ""])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = handle_split(
+        {"amount": -20000}, order, MemoGenerator("amazon.com"), Mock(), {}
+    )
+
+    assert result is not None
+    assert result[0]["amount"] == -20000
+
+
+# --- Tax rate: env var overrides ---
+
+
+def test_tax_rate_default_and_grocery_categories() -> None:
+    """Default 9% rate applies normally; a grocery-keyword category name
+    uses the reduced 4.5% rate."""
+    assert _tax_rate_for_category("Household: Supplies") == 0.09
+    assert _tax_rate_for_category("Food: Groceries") == 0.045
+    assert _tax_rate_for_category("Groceries") == 0.045
+    assert _tax_rate_for_category(None) == 0.09
+
+
+def test_tax_rate_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """YNAB_DEFAULT_TAX_RATE / YNAB_GROCERY_TAX_RATE override the built-in
+    defaults, read at call-time (so values loaded from .env after this
+    module is imported are still picked up)."""
+    monkeypatch.setenv("YNAB_DEFAULT_TAX_RATE", "0.0825")
+    monkeypatch.setenv("YNAB_GROCERY_TAX_RATE", "0.02")
+
+    assert _tax_rate_for_category("Household: Supplies") == 0.0825
+    assert _tax_rate_for_category("Groceries") == 0.02
+
+
+def test_tax_rate_env_override_invalid_value_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-numeric env override is ignored (with a warning), falling back
+    to the built-in default rather than crashing."""
+    monkeypatch.setenv("YNAB_DEFAULT_TAX_RATE", "not-a-number")
+
+    assert _tax_rate_for_category("Household: Supplies") == 0.09
+
+
+# --- _env_flag / YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM ---
+
+
+def test_env_flag_recognizes_common_truthy_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_env_flag accepts 1/true/yes/y case-insensitively; anything else, or
+    unset, is falsy."""
+    for value in ["1", "true", "TRUE", "yes", "y", "Y"]:
+        monkeypatch.setenv("_TEST_FLAG", value)
+        assert _env_flag("_TEST_FLAG") is True
+    for value in ["0", "false", "no", "", "maybe"]:
+        monkeypatch.setenv("_TEST_FLAG", value)
+        assert _env_flag("_TEST_FLAG") is False
+    monkeypatch.delenv("_TEST_FLAG", raising=False)
+    assert _env_flag("_TEST_FLAG") is False
+    assert _env_flag("_TEST_FLAG", default=True) is True
+
+
+def test_skip_split_prompt_single_item_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM set and nothing to split
+    (matching_order is None here), the 'Split this transaction?' prompt is
+    skipped entirely — only one _prompt_line response is needed, not two."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    monkeypatch.setenv("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM", "true")
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Cat One"),
+    )
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.get_multiline_input_with_custom_submit",
+        lambda *a, **k: "",
+    )
+    # Only "Enter item details manually?" -> n; no split-decision response.
+    responses = iter(["n"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = _handle_categorize(
+        transaction, None, "", MemoGenerator(), Mock(), Mock(), {}, {}, dry_run=True
+    )
+
+    assert result == "done"
+
+
+def test_split_prompt_still_asked_without_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the env var set, the split prompt is still asked even when
+    there's nothing to split — confirms the skip is opt-in, not a silent
+    default-behavior change."""
+    transaction = {
+        "id": "t1",
+        "account_id": "a1",
+        "date": "2025-01-15",
+        "amount": -15000,
+    }
+    monkeypatch.delenv("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM", raising=False)
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.prompt_for_category_selection",
+        lambda *a, **k: ("cat1", "Cat One"),
+    )
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli.get_multiline_input_with_custom_submit",
+        lambda *a, **k: "",
+    )
+    # Both responses required: "Split this transaction?" -> n, then
+    # "Enter item details manually?" -> n.
+    responses = iter(["n", "n"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = _handle_categorize(
+        transaction, None, "", MemoGenerator(), Mock(), Mock(), {}, {}, dry_run=True
+    )
+
+    assert result == "done"
+
+
+# --- process_transaction: auto-skip when order data doesn't match ---
+
+
+def test_process_transaction_auto_skips_unmatched_when_orders_provided(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When order data WAS provided this run but nothing matches this
+    specific transaction's amount, it's skipped automatically (no prompt)
+    rather than asking the user to categorize blind — and the skip is
+    counted in stats for the end-of-run summary."""
+    transaction = {
+        "id": "t1",
+        "date": "2024-01-01",
+        "payee_name": "Amazon",
+        "amount": -12340,  # does not match the $20.00 order below
+        "memo": "",
+    }
+    stats: dict[str, int] = {}
+
+    result = process_transaction(
+        transaction,
+        0,
+        1,
+        [_amount_matched_order()],
+        MemoGenerator(),
+        Mock(),
+        Mock(),
+        {},
+        {},
+        set(),
+        False,
+        stats,
+    )
+
+    captured = capsys.readouterr().out
+    assert result is True
+    assert "No matching order found" in captured
+    assert stats["auto_skipped_no_match"] == 1
+
+
+def test_process_transaction_no_orders_provided_still_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no order data was provided at all this run (parsed_orders is
+    None), the normal action prompt still fires — auto-skip only applies
+    when order data exists but doesn't cover this specific transaction."""
+    transaction = {
+        "id": "t1",
+        "date": "2024-01-01",
+        "payee_name": "Amazon",
+        "amount": -12340,
+        "memo": "",
+    }
+    responses = iter(["s"])  # skip via the normal action prompt
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = process_transaction(
+        transaction, 0, 1, None, MemoGenerator(), Mock(), Mock(), {}, {}
+    )
+
+    assert result is True
+
+
 def test_process_batch_preserves_existing_memo() -> None:
     """The batch update sent to YNAB retains pre-existing memo content."""
     client = Mock()
@@ -941,7 +1400,9 @@ def test_main_batch_dry_run_smoke(
         cli_module, "prompt_for_amazon_orders_data", lambda: [_batch_order()]
     )
     monkeypatch.setattr(
-        cli_module, "fetch_amazon_transactions", lambda *_args: [transaction]
+        cli_module,
+        "fetch_amazon_transactions",
+        lambda *_args, **_kwargs: [transaction],
     )
 
     exit_code = cli_module.main(["--batch", "--dry-run"])

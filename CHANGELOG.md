@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `--include-reconciled` flag to also surface already-reconciled Amazon transactions
+- Split entry accepts a pre-tax base price and auto-adds sales tax by category (`=` prefix for an exact total; rates overridable via `YNAB_DEFAULT_TAX_RATE` / `YNAB_GROCERY_TAX_RATE`)
+- `YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM` env flag to skip the split prompt for single-item transactions
+- Category selection now needs two consecutive blank Enters to cancel, instead of one
+- Transactions with no matching parsed order are auto-skipped (with a run-end summary) instead of prompting blind
+- `Ctrl+C` now exits cleanly instead of an uncaught traceback
+
+### Fixed
+
+- Quantity-badge items now expand to one entry per unit instead of collapsing to a single item
+- Near-duplicate item lines (reworded alt-text/title pairs) are deduped by token overlap instead of exact/prefix matching
+- Single-word variants of the same listing (e.g. "Black" vs "White") are kept as separate items instead of being merged as duplicates
+- Markdown-link-wrapped order copies now parse correctly
+- Recommendation carousels and footer nav after real order content are fully trimmed, not just the copyright line
+- Delivery-status lines ("Your package was...") no longer misidentified as items
+- `skip_words`/product-signal matching uses word boundaries, so "cart"/"prime" no longer false-match inside "Carton"/"Primer", etc.
+- Fixed an accidentally case-insensitive all-caps check that wrongly rejected ordinary all-letter product titles
+- Cancelled-order detection is now case-insensitive
+- A raw `OSError` from a YNAB API call is now caught and reported like other API errors instead of crashing the session
+
 ## [2.4.0] - 2026-07-10
 
 ### Added

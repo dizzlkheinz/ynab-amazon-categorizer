@@ -227,3 +227,222 @@ def test_parse_multi_order_page_mixed_layouts() -> None:
     # Third order has no parseable item but is still kept for amount matching.
     assert orders[2].items == []
     assert orders[2].total == 7.49
+
+
+def test_recommendation_carousel_and_footer_not_extracted_as_items() -> None:
+    """A full-page copy includes recommendation carousels and the site footer
+    after the real order content. These must be trimmed entirely, not just
+    the copyright line at the very end — real example: an order's item list
+    picked up 'Self-Publish with Us', 'Groceries & More', and other footer
+    nav text because only the final copyright line was used as a cutoff.
+    """
+    order_text = """Order placed
+June 26, 2026
+Total
+$62.12
+Order # 112-1234567-1234567
+View order details   View invoice
+
+Delivered July 2
+Your package was left near the front door or porch.
+ SANDISK 128GB MAX Endurance microSDXC Card with Adapter for Home Security Cameras and Dash cams
+SANDISK 128GB MAX Endurance microSDXC Card with Adapter for Home Security Cameras and Dash cams
+Return or replace items: Eligible through August 1, 2026
+Buy it again
+View your item
+Get product support
+Track package
+←Previous
+1
+2
+3
+Next→
+
+Customers who viewed items in your browsing history also viewedPage 1 of 3
+Previous set of slides
+SOSOHOME 6 Gallon Trash Bags, Small Garbage Bags, Fits 5-6 Gallon Bins, Clear
+4.5 out of 5 stars 4,410
+$8.99 ($0.12/count)
+Next set of slides
+Continue series you've startedPage 1 of 4
+The First Ranger: Frontiers Saga Part 3, Book 11
+Ryk Brown
+Next set of slides
+Your Browsing HistoryView or edit your browsing historyPage 1 of 6
+e.l.f. Camo Color Corrector for Dark Circles, Hydrating Under-Eye Brightening
+Next set of slides
+
+Back to top
+Get to Know Us
+Careers
+Self-Publish with Us
+See More Ways to Make Money
+Groceries at Amazon
+Groceries & More
+Right To Your Door
+© 1996-2026, Amazon.com, Inc. or its affiliates
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].items == [
+        "SANDISK 128GB MAX Endurance microSDXC Card with Adapter for Home "
+        "Security Cameras and Dash cams"
+    ]
+
+
+def test_markdown_link_wrapped_order_still_parses() -> None:
+    """Some order-history copies (e.g. from a markdown-rendering copy tool)
+    wrap every line as '* [Visible Text](https://...)'. This must not break
+    the order header match (a '* ' bullet in front of TOTAL/ORDER # used to
+    stop the header regex from matching at all — zero orders parsed) or leak
+    raw URLs / UI text into the extracted item.
+    """
+    order_text = """Order placed
+June 28, 2026
+
+* TOTAL
+$38.72
+* SHIP TO
+Derek Example
+* ORDER # 114-1234567-7654321
+* [View order details ](https://www.amazon.com/your-orders/order-details?orderID=x)[View invoice](https://www.amazon.com/gp/css/summary/print.html?orderID=x)
+Ask Alexa about this order
+Delivered June 30
+Your package was left near the front door or porch.
+
+* [Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38](https://www.amazon.com/dp/B01IT4V0M0?ref=x)
+Return or replace items: Eligible through July 30, 2026
+[Buy it again](https://www.amazon.com/gp/buyagain?ats=x)
+[View your item](https://www.amazon.com/your-orders/pop?ref=x)
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    order = orders[0]
+    assert order.order_id == "114-1234567-7654321"
+    assert order.total == 38.72
+    assert order.date_str == "June 28, 2026"
+    assert order.items == [
+        "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38"
+    ]
+    # No raw URL or markdown syntax leaked into the item text.
+    assert "http" not in order.items[0]
+    assert "[" not in order.items[0]
+
+
+def test_reworded_duplicate_below_flat_similarity_threshold_still_collapses() -> None:
+    """A real alt-text/title duplicate pair can score as low as ~60% token
+    overlap — well within the range of a genuinely different same-brand item
+    (e.g. two distinct sizes can score ~83%), so text similarity alone can't
+    reliably separate the two cases. The leading-space structural marker
+    (image alt-text line has one, the following title-link line doesn't) is
+    checked first and catches this even at low text-similarity.
+    """
+    order_text = """Order placed
+June 5, 2026
+Total
+$6.53
+Order # 114-7654321-1234567
+
+Delivered June 6
+Your package was left near the front door or porch.
+ Andiker Cat Spring Toy, 12 Pc Colorful Cat Kicker Toys Interactive Cat Toys for Indoor Cats Swatting, Biting, Hunting to Kill Time and Keep Fit
+Andiker Interactive Cat Spiral Creative Spring Toy to Kill Time and Keep Fit, Sturdy and Heavy Plastic for Swatting, Biting, Hunting Kitten Toys, Colorful, 12 pcs
+Buy it again
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert len(orders[0].items) == 1
+    assert "Andiker" in orders[0].items[0]
+
+
+def test_distinct_size_variant_not_merged_despite_high_similarity() -> None:
+    """Two distinct sizes of the same listing can score higher text-similarity
+    than a real duplicate pair (see test above), so this must stay as two
+    separate items rather than collapsing — the numeric-only-difference
+    exception applies regardless of the leading-space structural marker.
+    """
+    order_text = """Order placed
+June 28, 2026
+Total
+$38.72
+Order # 114-1234567-7654321
+
+ Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38
+Return or replace items: Eligible through July 30, 2026
+Buy it again
+View your item
+
+ Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 36
+Buy it again
+View your item
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].items == [
+        "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38",
+        "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 36",
+    ]
+
+
+def test_distinct_color_word_variant_not_merged_despite_high_similarity() -> None:
+    """Two color variants of the same listing differ by a single *word*
+    ("Black" vs "White"), so the numeric-only-difference exception doesn't
+    apply — yet their token overlap far exceeds both duplicate thresholds.
+    The single-word-substitution exception must keep them as two items,
+    exactly like the numeric size variants in the test above.
+    """
+    order_text = """Order placed
+July 2, 2026
+Total
+$56.42
+Order # 114-1234567-1111111
+
+ Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black
+Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black
+Buy it again
+View your item
+
+ Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White
+Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White
+Buy it again
+View your item
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].items == [
+        "Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black",
+        "Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White",
+    ]
+
+
+def test_plural_only_rewording_still_collapses_as_duplicate() -> None:
+    """A single-token difference that is just a plural/spelling tweak
+    ("Toys" vs "Toy") is an alt-text/title rewording of the same item, not a
+    color/size variant — the substitution exception must not split it.
+    """
+    order_text = """Order placed
+June 12, 2026
+Total
+$11.99
+Order # 114-2222222-1234567
+
+ Petstages Tower of Tracks Interactive 3-Tier Cat Toys
+Petstages Tower of Tracks Interactive 3-Tier Cat Toy
+Buy it again
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert len(orders[0].items) == 1
+    assert "Petstages" in orders[0].items[0]

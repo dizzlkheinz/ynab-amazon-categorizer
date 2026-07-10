@@ -27,11 +27,24 @@ from .payloads import (
     build_single_payload,
     build_split_payload,
 )
+from .tax import tax_rate_for_category as _tax_rate_for_category
 from .transaction_matcher import TransactionMatcher
 from .transactions import fetch_amazon_transactions
 from .ynab_client import YNABClient
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(var_name: str, default: bool = False) -> bool:
+    """Read a boolean flag from the environment (e.g. a .env file).
+
+    Truthy values: ``1``, ``true``, ``yes``, ``y`` (case-insensitive).
+    Read at call-time so values loaded from ``.env`` during startup are used.
+    """
+    raw = os.getenv(var_name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "y")
 
 
 def prompt_for_amazon_orders_data() -> list[Order] | None:
@@ -257,15 +270,27 @@ def prompt_for_category_selection(
 ) -> tuple[str | None, str | None]:
     history_file = os.path.join(os.path.expanduser("~"), ".ynab_amazon_cat_history")
     history = FileHistory(history_file)
+    empty_streak = 0
     while True:
         try:
             user_input = prompt(
-                "Enter category name (Tab to complete, Enter to confirm, leave empty or type 'b' to go back): ",
+                "Enter category name (Tab to complete, Enter to confirm, "
+                "empty+Enter twice or 'b' to go back): ",
                 completer=category_completer,
                 history=history,
                 reserve_space_for_menu=5,
             ).strip()
-            if not user_input or user_input.lower() == "b":
+            if not user_input:
+                empty_streak += 1
+                if empty_streak >= 2:
+                    return None, None
+                print(
+                    "Press Enter again with nothing typed to go back, "
+                    "or start typing a category name."
+                )
+                continue
+            empty_streak = 0
+            if user_input.lower() == "b":
                 return None, None
             input_lower = user_input.lower()
             if input_lower in name_to_id_map:
@@ -429,19 +454,43 @@ def handle_split(
             print("Cancelling split process.")
             return None
 
-        # Get amount for this split
+        # Get amount for this split: enter the pre-tax base item price and
+        # let the tool add sales tax automatically (rate chosen by category
+        # via _tax_rate_for_category). Blank uses the full remaining balance
+        # as-is (e.g. for a final catch-all split); '=' prefix enters an
+        # exact charged total with no tax math applied.
+        tax_rate = _tax_rate_for_category(category_name)
+        tax_pct = tax_rate * 100
         while True:
             try:
                 max_amount = abs(remaining_milliunits / 1000.0)
-                amount_str = _prompt_line(
-                    f"Enter amount for '{category_name}' (positive, max {max_amount:.2f}, default {max_amount:.2f}): "
-                )
-                if not amount_str:
-                    amount_str = str(max_amount)
-                split_amount_float = float(amount_str)
-                if split_amount_float <= 0:
-                    print("Amount must be positive.")
-                    continue
+                max_base = max_amount / (1 + tax_rate) if tax_rate else max_amount
+                base_str = _prompt_line(
+                    f"Enter base price for '{category_name}' ({tax_pct:g}% tax, "
+                    f"max base ~{max_base:.2f}, blank = remaining {max_amount:.2f} as-is): "
+                ).strip()
+
+                if not base_str:
+                    split_amount_float = max_amount
+                elif base_str.startswith("="):
+                    split_amount_float = float(
+                        base_str[1:].replace("$", "").replace(",", "")
+                    )
+                    if split_amount_float <= 0:
+                        print("Amount must be positive.")
+                        continue
+                else:
+                    base_amount = float(base_str.replace("$", "").replace(",", ""))
+                    if base_amount <= 0:
+                        print("Amount must be positive.")
+                        continue
+                    tax_amount = round(base_amount * tax_rate, 2)
+                    split_amount_float = round(base_amount + tax_amount, 2)
+                    print(
+                        f"  Base: ${base_amount:.2f}  +  Tax ({tax_pct:g}%): "
+                        f"${tax_amount:.2f}  =  Total: ${split_amount_float:.2f}"
+                    )
+
                 split_amount_milliunits = compute_split_amount(
                     split_amount_float, remaining_milliunits
                 )
@@ -551,6 +600,7 @@ def process_transaction(
     category_id_map: dict[str, str],
     used_order_ids: set[str] | None = None,
     dry_run: bool = False,
+    stats: dict[str, int] | None = None,
 ) -> bool:
     """Process a single transaction through the interactive flow.
 
@@ -559,7 +609,9 @@ def process_transaction(
     ``used_order_ids`` accumulates the order IDs already applied to a
     transaction so the matcher does not reuse one order for several
     same-amount transactions. When ``dry_run`` is True no changes are sent
-    to YNAB and matched orders are not marked as used.
+    to YNAB and matched orders are not marked as used. ``stats``, if given,
+    is used to accumulate run-level counters (currently just
+    ``auto_skipped_no_match``) for a summary printed at the end of the run.
     """
     transaction_id = transaction["id"]
     date = transaction["date"]
@@ -598,6 +650,10 @@ def process_transaction(
         else f"{amount_float:.2f}"
     )
     print(f"  Amount: {amount_display}")
+    if transaction.get("cleared") == "reconciled":
+        print(
+            "  Status: 🔒 reconciled (category edits do not affect the reconciled balance)"
+        )
     if original_memo:
         print(f"  Original Memo: {original_memo}")
 
@@ -606,7 +662,21 @@ def process_transaction(
         if matching_order:
             display_matched_order(matching_order, memo_generator)
         else:
-            print("  ⚠ No matching order found in parsed Amazon data")
+            # Order data was provided for this run, but nothing matched this
+            # specific transaction (by amount/date). There's no data to help
+            # categorize it, so skip the prompt instead of asking blind.
+            # (When parsed_orders itself is empty/None — i.e. no order data
+            # was provided at all this run — we fall through to the normal
+            # action loop below, which still offers manual item entry.)
+            print(
+                "  ⚠ No matching order found in parsed Amazon data — "
+                "skipping (nothing to categorize from)."
+            )
+            if stats is not None:
+                stats["auto_skipped_no_match"] = (
+                    stats.get("auto_skipped_no_match", 0) + 1
+                )
+            return True
 
     while True:  # Action loop (c, s, q)
         action = _prompt_line(
@@ -678,8 +748,17 @@ def _handle_categorize(
 
     if should_offer_split:
         print("There is more than one item in this transaction.")
-
-    split_decision = _prompt_line("Split this transaction? (y/n, default n): ").lower()
+        split_decision = _prompt_line(
+            "Split this transaction? (y/n, default n): "
+        ).lower()
+    elif _env_flag("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM"):
+        # Only one item (or no matched order) — nothing to split, and the
+        # user has opted via .env to skip asking about it every time.
+        split_decision = "n"
+    else:
+        split_decision = _prompt_line(
+            "Split this transaction? (y/n, default n): "
+        ).lower()
 
     if split_decision != "y":
         # --- SINGLE CATEGORY ---
@@ -727,7 +806,11 @@ def _handle_categorize(
                 ynab_client.update_transaction(transaction_id, updated_payload_dict)
                 print("Update successful.")
                 return "done"
-            except (YNABAPIError, requests.exceptions.RequestException) as exc:
+            except (
+                YNABAPIError,
+                requests.exceptions.RequestException,
+                OSError,
+            ) as exc:
                 logger.error("Failed to update transaction %s: %s", transaction_id, exc)
                 print(f"Update failed: {exc}")
                 return "continue"
@@ -764,6 +847,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Combine with --dry-run to preview."
         ),
     )
+    parser.add_argument(
+        "--include-reconciled",
+        action="store_true",
+        help=(
+            "Also surface uncategorized Amazon transactions that are already "
+            "reconciled (excluded by default). Category edits don't affect "
+            "the reconciled balance. Combine with --dry-run to just print the "
+            "suggested categories for manual entry without writing to YNAB."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -771,11 +864,16 @@ def _run(argv: list[str] | None = None) -> int:
     """Run the CLI workflow and return a process exit code."""
     args = _parse_args(argv)
     dry_run = args.dry_run
+    include_reconciled = args.include_reconciled
 
     logging.basicConfig(level=logging.INFO)
 
     if dry_run:
         print("*** DRY RUN: no changes will be sent to YNAB. ***")
+    if include_reconciled:
+        print("*** Including already-reconciled transactions. ***")
+    if _env_flag("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM"):
+        print("*** Skipping split prompt for single-item transactions. ***")
 
     # Load configuration using extracted Config class
     try:
@@ -796,7 +894,11 @@ def _run(argv: list[str] | None = None) -> int:
         categories_list, category_name_map, category_id_map = (
             ynab_client.get_categories()
         )
-    except (YNABAPIError, requests.exceptions.RequestException) as exc:
+    except (
+        YNABAPIError,
+        requests.exceptions.RequestException,
+        OSError,
+    ) as exc:
         logger.error("Failed to fetch categories: %s", exc)
         print(f"Could not fetch categories: {exc}")
         return 1
@@ -837,15 +939,26 @@ def _run(argv: list[str] | None = None) -> int:
 
     print("\nFetching transactions...")
     try:
-        transactions_to_process = fetch_amazon_transactions(ynab_client, config)
-    except (YNABAPIError, requests.exceptions.RequestException) as exc:
+        transactions_to_process = fetch_amazon_transactions(
+            ynab_client, config, include_reconciled=include_reconciled
+        )
+    except (
+        YNABAPIError,
+        requests.exceptions.RequestException,
+        OSError,
+    ) as exc:
         logger.error("Failed to fetch transactions: %s", exc)
         print(f"Could not fetch transactions: {exc}")
         return 1
 
+    reconciled_count = sum(
+        1 for t in transactions_to_process if t.get("cleared") == "reconciled"
+    )
     print(
         f"\nFound {len(transactions_to_process)} uncategorized Amazon transaction(s) needing attention."
     )
+    if reconciled_count:
+        print(f"  ({reconciled_count} of these are already reconciled 🔒)")
 
     # --- Batch Mode (non-interactive memo enrichment) ---
     if args.batch:
@@ -865,6 +978,7 @@ def _run(argv: list[str] | None = None) -> int:
 
     # --- Process Transactions (Main Loop) ---
     used_order_ids: set[str] = set()
+    stats: dict[str, int] = {}
     for i, t in enumerate(transactions_to_process):
         should_continue = process_transaction(
             t,
@@ -878,12 +992,19 @@ def _run(argv: list[str] | None = None) -> int:
             category_id_map,
             used_order_ids,
             dry_run,
+            stats,
         )
         if not should_continue:
             return 0
 
     # End of processing loop
     print("\nFinished processing transactions.")
+    auto_skipped = stats.get("auto_skipped_no_match", 0)
+    if auto_skipped:
+        print(
+            f"  ({auto_skipped} auto-skipped: no matching order data for that "
+            "transaction)"
+        )
     return 0
 
 
