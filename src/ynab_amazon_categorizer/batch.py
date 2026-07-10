@@ -40,15 +40,30 @@ def process_batch(
             skipped += 1
             continue
 
+        # A confident match belongs to this transaction even when enrichment is
+        # unnecessary or impossible. Do not let a later same-amount transaction
+        # reuse the order merely because this transaction does not get updated.
+        if order.order_id:
+            used_order_ids.add(order.order_id)
+
         original_memo = transaction.get("memo")
+        existing_memo = original_memo if isinstance(original_memo, str) else ""
         memo = build_batch_memo(
             order,
             memo_generator,
-            original_memo if isinstance(original_memo, str) else "",
+            existing_memo,
         )
         if memo is None:
             logger.info(
                 "Skipping transaction %s because enrichment would truncate its memo.",
+                transaction["id"],
+            )
+            skipped += 1
+            continue
+
+        if memo == existing_memo:
+            logger.info(
+                "Skipping transaction %s because its memo is already enriched.",
                 transaction["id"],
             )
             skipped += 1
@@ -63,16 +78,12 @@ def process_batch(
 
         if dry_run:
             print(f"  [dry-run] would enrich {payee} {amount_display}: {summary}")
-            if order.order_id:
-                used_order_ids.add(order.order_id)
             enriched += 1
             continue
 
         try:
             ynab_client.update_transaction(transaction["id"], payload)
             print(f"  ✓ Enriched {payee} {amount_display}: {summary}")
-            if order.order_id:
-                used_order_ids.add(order.order_id)
             enriched += 1
         except (YNABAPIError, requests.exceptions.RequestException) as exc:
             logger.error("Failed to enrich transaction %s: %s", transaction["id"], exc)

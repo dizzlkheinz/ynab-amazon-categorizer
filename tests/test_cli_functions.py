@@ -874,6 +874,24 @@ def test_process_batch_preserves_existing_memo() -> None:
     assert payload["approved"] is False
 
 
+def test_process_batch_skips_already_enriched_memo_and_consumes_order() -> None:
+    """An idempotent rerun sends no update or reuses the matched order."""
+    client = Mock()
+    order = _batch_order()
+    transaction = _batch_txn("t1", -20000)
+    transaction["memo"] = build_batch_memo(order, MemoGenerator())
+
+    result = process_batch(
+        [transaction, _batch_txn("t2", -20000)],
+        [order],
+        MemoGenerator(),
+        client,
+    )
+
+    assert result == (0, 2, 0)
+    client.update_transaction.assert_not_called()
+
+
 def test_process_batch_skips_when_existing_memo_cannot_be_preserved() -> None:
     """Batch mode skips rather than truncating a nearly-full existing memo."""
     client = Mock()
@@ -883,6 +901,23 @@ def test_process_batch_skips_when_existing_memo_cannot_be_preserved() -> None:
     result = process_batch([transaction], [_batch_order()], MemoGenerator(), client)
 
     assert result == (0, 1, 0)
+    client.update_transaction.assert_not_called()
+
+
+def test_process_batch_oversized_memo_consumes_matched_order() -> None:
+    """A too-long memo cannot make its order available to a later transaction."""
+    client = Mock()
+    transaction = _batch_txn("t1", -20000)
+    transaction["memo"] = "X" * 195
+
+    result = process_batch(
+        [transaction, _batch_txn("t2", -20000)],
+        [_batch_order()],
+        MemoGenerator(),
+        client,
+    )
+
+    assert result == (0, 2, 0)
     client.update_transaction.assert_not_called()
 
 
