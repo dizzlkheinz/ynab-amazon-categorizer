@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-07-10
+
+### Added
+
+- Display tool version number in configuration summary at startup
+
 ## [2.4.1] - 2026-07-10
 
 ### Added

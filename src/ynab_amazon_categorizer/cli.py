@@ -13,6 +13,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
+from . import __version__
 from .amazon_parser import AmazonParser, Order
 from .batch import process_batch
 from .config import Config
@@ -184,6 +185,7 @@ def prompt_for_item_details() -> dict[str, str | int | float | list[str] | None]
 
 def print_config_summary(config: Config) -> None:
     """Print configuration summary without exposing secrets."""
+    print(f"ynab-amazon-categorizer v{__version__}")
     print("✓ Configuration loaded successfully")
     print("✓ API Key: configured")
     if config.budget_id and len(config.budget_id) >= 4:
