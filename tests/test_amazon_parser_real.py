@@ -336,3 +336,59 @@ View your item
         "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 38",
         "Lee Men's Dungarees New Belted Wyoming Cargo Short, Bourbon, 36",
     ]
+
+
+def test_distinct_color_word_variant_not_merged_despite_high_similarity() -> None:
+    """Two color variants of the same listing differ by a single *word*
+    ("Black" vs "White"), so the numeric-only-difference exception doesn't
+    apply — yet their token overlap far exceeds both duplicate thresholds.
+    The single-word-substitution exception must keep them as two items,
+    exactly like the numeric size variants in the test above.
+    """
+    order_text = """Order placed
+July 2, 2026
+Total
+$56.42
+Order # 114-1234567-1111111
+
+ Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black
+Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black
+Buy it again
+View your item
+
+ Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White
+Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White
+Buy it again
+View your item
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].items == [
+        "Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, Black",
+        "Owala FreeSip Insulated Stainless Steel Water Bottle with Straw, 24 oz, White",
+    ]
+
+
+def test_plural_only_rewording_still_collapses_as_duplicate() -> None:
+    """A single-token difference that is just a plural/spelling tweak
+    ("Toys" vs "Toy") is an alt-text/title rewording of the same item, not a
+    color/size variant — the substitution exception must not split it.
+    """
+    order_text = """Order placed
+June 12, 2026
+Total
+$11.99
+Order # 114-2222222-1234567
+
+ Petstages Tower of Tracks Interactive 3-Tier Cat Toys
+Petstages Tower of Tracks Interactive 3-Tier Cat Toy
+Buy it again
+"""
+    parser = AmazonParser()
+    orders = parser.parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert len(orders[0].items) == 1
+    assert "Petstages" in orders[0].items[0]

@@ -96,6 +96,26 @@ def _differs_only_numerically(a: str, b: str) -> bool:
     return bool(differing_tokens) and all(t.isdigit() for t in differing_tokens)
 
 
+def _differs_by_single_word_substitution(a: str, b: str) -> bool:
+    """True if the two lines differ by exactly one token swapped for another.
+
+    e.g. "...24 oz, Black" vs. "...24 oz, White" — a color/size *word* variant
+    of the same listing, i.e. a real separate line item, the word analogue of
+    _differs_only_numerically. Restricted to exactly one unique token per side
+    because genuine reworded alt-text/title pairs for a single item differ by
+    several tokens on each side (real example: an alt/title pair with 4 vs. 7
+    unique tokens), and a looser rule would wrongly split those. A prefix
+    relationship between the two tokens ("Toy"/"Toys", "Color"/"Colorful")
+    is treated as a spelling/plural rewording of the same item, not a variant.
+    """
+    tokens_a, tokens_b = _item_token_set(a), _item_token_set(b)
+    only_a, only_b = tokens_a - tokens_b, tokens_b - tokens_a
+    if len(only_a) != 1 or len(only_b) != 1:
+        return False
+    (token_a,), (token_b,) = only_a, only_b
+    return not (token_a.startswith(token_b) or token_b.startswith(token_a))
+
+
 def _token_overlap(a: str, b: str) -> float:
     """Jaccard similarity of two lines' token sets. 0 if either has no tokens."""
     tokens_a, tokens_b = _item_token_set(a), _item_token_set(b)
@@ -114,9 +134,13 @@ def _is_duplicate_item_pair(
     separates true duplicates from genuinely different same-brand items in a
     way text similarity alone cannot (real examples overlap: a true
     duplicate can score lower than a real distinct-size variant). Falls back
-    to the plain similarity check otherwise.
+    to the plain similarity check otherwise. Numeric-only and single-word
+    substitutions are size/color variants of the same listing — genuinely
+    separate items — and are never treated as duplicates.
     """
     if _differs_only_numerically(prev_item, item):
+        return False
+    if _differs_by_single_word_substitution(prev_item, item):
         return False
     if prev_had_leading_space and not had_leading_space:
         return _token_overlap(prev_item, item) >= ADJACENT_DUPLICATE_JACCARD_FLOOR

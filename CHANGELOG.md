@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Quantity-badge items now expand to one entry per unit instead of collapsing to a single item
 - Near-duplicate item lines (reworded alt-text/title pairs) are deduped by token overlap instead of exact/prefix matching
+- Single-word variants of the same listing (e.g. "Black" vs "White") are kept as separate items instead of being merged as duplicates
 - Markdown-link-wrapped order copies now parse correctly
 - Recommendation carousels and footer nav after real order content are fully trimmed, not just the copyright line
 - Delivery-status lines ("Your package was...") no longer misidentified as items
