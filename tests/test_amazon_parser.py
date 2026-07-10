@@ -463,8 +463,8 @@ def test_footer_boilerplate_not_extracted() -> None:
         )
 
 
-def test_subscription_order_does_not_bleed_into_previous_order() -> None:
-    """Unparsed digital subscription blocks still terminate the previous order."""
+def test_subscription_order_is_parsed_without_item_bleed() -> None:
+    """Digital subscription blocks parse independently between physical orders."""
     order_text = """
     Order placed
     July 7, 2026
@@ -515,11 +515,13 @@ def test_subscription_order_does_not_bleed_into_previous_order() -> None:
     parser = AmazonParser()
     orders = parser.parse_orders_page(order_text)
 
-    assert len(orders) == 2
+    assert len(orders) == 3
     first_order_items = " ".join(orders[0].items)
     assert "Natural Factors" in first_order_items
     assert "Audible Standard Plus" not in first_order_items
-    assert "Yupik" in " ".join(orders[1].items)
+    assert orders[1].order_id == "D01-3004731-5334665"
+    assert "Audible Standard Plus" in " ".join(orders[1].items)
+    assert "Yupik" in " ".join(orders[2].items)
 
 
 def test_recommendations_after_pagination_do_not_leak_into_last_order() -> None:

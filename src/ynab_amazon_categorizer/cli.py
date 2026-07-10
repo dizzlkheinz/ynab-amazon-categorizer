@@ -3,8 +3,7 @@ import copy
 import json
 import logging
 import os
-import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import requests
@@ -15,78 +14,37 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 
 from .amazon_parser import AmazonParser, Order
+from .batch import process_batch
 from .config import Config
 from .exceptions import ConfigurationError, YNABAPIError
-from .memo_generator import MemoGenerator, sanitize_memo
+from .memo_generator import (
+    MemoGenerator,
+    generate_split_summary_memo,
+    sanitize_memo,
+)
+from .models import SaveSubtransaction, TransactionUpdate, format_currency_amount
+from .payloads import (
+    build_single_payload,
+    build_split_payload,
+)
+from .tax import tax_rate_for_category as _tax_rate_for_category
 from .transaction_matcher import TransactionMatcher
+from .transactions import fetch_amazon_transactions
 from .ynab_client import YNABClient
 
 logger = logging.getLogger(__name__)
-
-# --- CONFIGURATION ---
-
-
-AMAZON_PAYEE_KEYWORDS = ["amazon", "amzn", "amz"]
-YNAB_API_URL = "https://api.ynab.com/v1"
-
-# Sales tax auto-applied when entering a split's *base* (pre-tax) item price.
-# These are fallback defaults; override via YNAB_DEFAULT_TAX_RATE /
-# YNAB_GROCERY_TAX_RATE in the environment or your .env file (e.g.
-# YNAB_DEFAULT_TAX_RATE=0.09, YNAB_GROCERY_TAX_RATE=0.045).
-DEFAULT_TAX_RATE = 0.09  # 9% - most purchases
-GROCERY_TAX_RATE = 0.045  # 4.5% - groceries
-GROCERY_CATEGORY_KEYWORDS = ("grocery", "groceries")
-
-
-def _env_tax_rate(var_name: str, fallback: float) -> float:
-    """Read a tax rate override from the environment, falling back on parse errors.
-
-    Read at call-time (not as a module-level constant) so values loaded from
-    a .env file by ``Config.from_env()`` during startup are picked up — that
-    load happens after this module is imported, so a module-level
-    ``os.getenv()`` here would always miss them.
-    """
-    raw = os.getenv(var_name)
-    if not raw:
-        return fallback
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning(
-            "Ignoring invalid %s=%r (not a number); using default %.4f",
-            var_name,
-            raw,
-            fallback,
-        )
-        return fallback
 
 
 def _env_flag(var_name: str, default: bool = False) -> bool:
     """Read a boolean flag from the environment (e.g. a .env file).
 
     Truthy values: ``1``, ``true``, ``yes``, ``y`` (case-insensitive).
-    Read at call-time for the same reason as ``_env_tax_rate``.
+    Read at call-time so values loaded from ``.env`` during startup are used.
     """
     raw = os.getenv(var_name)
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "y")
-
-
-def _tax_rate_for_category(category_name: str | None) -> float:
-    """Pick the auto-apply tax rate for a split based on its category name.
-
-    Falls back to ``DEFAULT_TAX_RATE`` unless the category name contains a
-    grocery keyword, in which case ``GROCERY_TAX_RATE`` is used. Both can be
-    overridden via ``YNAB_DEFAULT_TAX_RATE`` / ``YNAB_GROCERY_TAX_RATE``.
-    """
-    default_rate = _env_tax_rate("YNAB_DEFAULT_TAX_RATE", DEFAULT_TAX_RATE)
-    grocery_rate = _env_tax_rate("YNAB_GROCERY_TAX_RATE", GROCERY_TAX_RATE)
-    if category_name and any(
-        keyword in category_name.lower() for keyword in GROCERY_CATEGORY_KEYWORDS
-    ):
-        return grocery_rate
-    return default_rate
 
 
 def prompt_for_amazon_orders_data() -> list[Order] | None:
@@ -114,7 +72,10 @@ def prompt_for_amazon_orders_data() -> list[Order] | None:
     if parsed_orders:
         print(f"\n✓ Successfully parsed {len(parsed_orders)} orders from Amazon data")
         for order in parsed_orders[:3]:
-            print(f"  - Order {order.order_id}: ${order.total} on {order.date_str}")
+            print(
+                f"  - Order {order.order_id}: "
+                f"{format_currency_amount(order.total, order.currency)} on {order.date_str}"
+            )
         if len(parsed_orders) > 3:
             print(f"  ... and {len(parsed_orders) - 3} more orders")
     else:
@@ -160,27 +121,6 @@ def _prompt_line(message: str) -> str:
     ``.lower()`` chains on the result keep working.
     """
     return prompt(message)
-
-
-def generate_split_summary_memo(matching_order: Order) -> str:
-    """Generate a summary memo for split transactions showing all items"""
-    if (
-        not matching_order
-        or not hasattr(matching_order, "items")
-        or not matching_order.items
-    ):
-        return ""
-
-    items = matching_order.items
-    if len(items) == 1:
-        return sanitize_memo(items[0])
-
-    # Format as: "2 Items:\n- Item 1\n- Item 2"
-    summary = f"{len(items)} Items:"
-    for item in items:
-        summary += f"\n- {item}"
-
-    return sanitize_memo(summary)
 
 
 def _prompt_quantity() -> int | None:
@@ -257,13 +197,13 @@ def print_config_summary(config: Config) -> None:
 
 
 def build_preview(
-    payload: dict[str, Any], category_id_map: dict[str, str]
+    payload: Mapping[str, object], category_id_map: dict[str, str]
 ) -> dict[str, Any]:
     """Build a preview dict from payload with category names injected.
 
     Uses deep copy to avoid mutating the original payload.
     """
-    preview_dict: dict[str, Any] = copy.deepcopy(payload)
+    preview_dict: dict[str, Any] = copy.deepcopy(dict(payload))
     category_id = preview_dict.get("category_id")
     if isinstance(category_id, str):
         category_name = category_id_map.get(category_id, "Unknown Category")
@@ -306,134 +246,6 @@ def compute_split_amount(amount_float: float, remaining_milliunits: int) -> int:
         split_amount_milliunits = remaining_milliunits
 
     return split_amount_milliunits
-
-
-def build_single_payload(
-    transaction: dict[str, Any],
-    category_id: str,
-    memo: str,
-) -> dict[str, Any]:
-    """Build update payload for a single-category transaction."""
-    return {
-        "id": transaction["id"],
-        "account_id": transaction["account_id"],
-        "date": transaction["date"],
-        "amount": transaction["amount"],
-        "payee_id": transaction.get("payee_id"),
-        "payee_name": transaction.get("payee_name", "N/A"),
-        "category_id": category_id,
-        "memo": sanitize_memo(memo),
-        "cleared": transaction.get("cleared"),
-        "approved": True,
-        "flag_color": transaction.get("flag_color"),
-        "import_id": transaction.get("import_id"),
-    }
-
-
-def build_memo_only_payload(transaction: dict[str, Any], memo: str) -> dict[str, Any]:
-    """Build an update payload that changes only the memo.
-
-    Used by batch mode: the category and approved status are preserved exactly
-    as YNAB returned them, so the transaction stays uncategorized for later
-    review while gaining the enriched Amazon memo.
-    """
-    return {
-        "id": transaction["id"],
-        "account_id": transaction["account_id"],
-        "date": transaction["date"],
-        "amount": transaction["amount"],
-        "payee_id": transaction.get("payee_id"),
-        "payee_name": transaction.get("payee_name", "N/A"),
-        "category_id": transaction.get("category_id"),
-        "memo": sanitize_memo(memo),
-        "cleared": transaction.get("cleared"),
-        "approved": transaction.get("approved", False),
-        "flag_color": transaction.get("flag_color"),
-        "import_id": transaction.get("import_id"),
-    }
-
-
-def build_batch_memo(order: Order, memo_generator: MemoGenerator) -> str:
-    """Build the auto-enrich memo (item summary + order link) for batch mode."""
-    items_text = generate_split_summary_memo(order) or "Amazon Purchase"
-    order_link = memo_generator.generate_amazon_order_link(order.order_id)
-    raw = f"{items_text}\n {order_link}" if order_link else items_text
-    return sanitize_memo(raw)
-
-
-def build_split_payload(
-    transaction: dict[str, Any],
-    subtransactions: list[dict[str, int | str | None]],
-    matching_order: Order | None,
-    original_memo: str,
-) -> dict[str, Any]:
-    """Build update payload for a split transaction."""
-    memo = (
-        generate_split_summary_memo(matching_order)
-        if matching_order
-        else sanitize_memo(original_memo)
-    )
-    return {
-        "id": transaction["id"],
-        "account_id": transaction["account_id"],
-        "date": transaction["date"],
-        "amount": transaction["amount"],
-        "payee_id": transaction.get("payee_id"),
-        "payee_name": transaction.get("payee_name", "N/A"),
-        "category_id": None,
-        "memo": memo,
-        "cleared": transaction.get("cleared"),
-        "approved": True,
-        "flag_color": transaction.get("flag_color"),
-        "import_id": transaction.get("import_id"),
-        "subtransactions": subtransactions,
-    }
-
-
-def fetch_amazon_transactions(
-    ynab_client: YNABClient, config: Config, include_reconciled: bool = False
-) -> list[dict[str, Any]]:
-    """Fetch transactions from YNAB and filter to uncategorized Amazon ones.
-
-    By default, reconciled transactions are excluded since they're treated
-    as locked/verified against a bank statement. Pass ``include_reconciled=True``
-    to also surface those (e.g. for manual review, or because YNAB itself
-    allows editing category on reconciled transactions without affecting
-    the reconciled balance).
-    """
-    transactions_endpoint = f"/budgets/{config.budget_id}/transactions"
-    if config.account_id:
-        transactions_endpoint = (
-            f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
-        )
-    transactions_data = ynab_client.get_data(transactions_endpoint)
-    if not isinstance(transactions_data, dict):
-        return []
-    transactions_raw_obj = transactions_data.get("transactions")
-    if not isinstance(transactions_raw_obj, list):
-        return []
-    transactions_raw: list[Any] = transactions_raw_obj
-    transactions: list[dict[str, Any]] = [
-        transaction for transaction in transactions_raw if isinstance(transaction, dict)
-    ]
-    logger.info("Fetched %d transactions.", len(transactions))
-    transactions_to_process = []
-    for t in transactions:
-        payee_name = t.get("payee_name", "").lower() if t.get("payee_name") else ""
-        is_amazon = any(keyword in payee_name for keyword in AMAZON_PAYEE_KEYWORDS)
-        is_uncategorized = t.get("category_id") is None
-        is_not_reconciled = include_reconciled or t.get("cleared") != "reconciled"
-        is_valid_for_processing = (
-            is_amazon
-            and is_uncategorized
-            and is_not_reconciled
-            and t.get("amount", 0) != 0
-            and t.get("transfer_account_id") is None
-            and not t.get("subtransactions")
-        )
-        if is_valid_for_processing:
-            transactions_to_process.append(t)
-    return transactions_to_process
 
 
 class CategoryCompleter(Completer):
@@ -510,7 +322,8 @@ def display_matched_order(matching_order: Order, memo_generator: MemoGenerator) 
     print("\n  🎯 MATCHED ORDER FOUND:")
     print(f"     Order ID: {matching_order.order_id}")
     print(
-        f"     Total: ${matching_order.total if matching_order.total is not None else 'N/A'}"
+        f"     Total: "
+        f"{format_currency_amount(matching_order.total, matching_order.currency)}"
     )
     print(
         f"     Date: {matching_order.date_str if matching_order.date_str is not None else 'N/A'}"
@@ -603,18 +416,18 @@ def resolve_memo(
 
 
 def handle_split(
-    transaction: dict[str, Any],
+    transaction: Mapping[str, Any],
     matching_order: Order | None,
     memo_generator: MemoGenerator,
     category_completer: CategoryCompleter,
     category_name_map: dict[str, str],
-) -> list[dict[str, int | str | None]] | None:
+) -> list[SaveSubtransaction] | None:
     """Handle split transaction flow.
 
     Returns list of subtransaction dicts, or None if cancelled.
     """
     print("\n--- Splitting Transaction ---")
-    subtransactions: list[dict[str, int | str | None]] = []
+    subtransactions: list[SaveSubtransaction] = []
     amount_milliunits = transaction["amount"]
     remaining_milliunits = amount_milliunits
     split_count = 1
@@ -776,7 +589,7 @@ def _resolve_split_memo(
 
 
 def process_transaction(
-    transaction: dict[str, Any],
+    transaction: Mapping[str, Any],
     index: int,
     total: int,
     parsed_orders: list[Order] | None,
@@ -807,8 +620,19 @@ def process_transaction(
     amount_float = amount_milliunits / 1000.0
     original_memo = transaction.get("memo", "")
 
+    matching_order: Order | None = None
+    if parsed_orders:
+        transaction_matcher = TransactionMatcher()
+        matching_order = transaction_matcher.find_matching_order(
+            amount_float, date, parsed_orders, used_order_ids
+        )
+
     if amount_milliunits > 0:
-        print(f"Found inflow transaction: {payee} ${amount_float:.2f}")
+        currency = matching_order.currency if matching_order else None
+        print(
+            f"Found inflow transaction: {payee} "
+            f"{format_currency_amount(amount_float, currency)}"
+        )
         process_inflow = _prompt_line(
             "Process this inflow (refund/credit)? (y/n, default n): "
         ).lower()
@@ -820,7 +644,12 @@ def process_transaction(
     print(f"  ID:   {transaction_id}")
     print(f"  Date: {date}")
     print(f"  Payee: {payee}")
-    print(f"  Amount: {amount_float:.2f}")
+    amount_display = (
+        format_currency_amount(amount_float, matching_order.currency)
+        if matching_order
+        else f"{amount_float:.2f}"
+    )
+    print(f"  Amount: {amount_display}")
     if transaction.get("cleared") == "reconciled":
         print(
             "  Status: 🔒 reconciled (category edits do not affect the reconciled balance)"
@@ -829,12 +658,7 @@ def process_transaction(
         print(f"  Original Memo: {original_memo}")
 
     # Try to find matching order from parsed data and show it
-    matching_order: Order | None = None
     if parsed_orders:
-        transaction_matcher = TransactionMatcher()
-        matching_order = transaction_matcher.find_matching_order(
-            amount_float, date, parsed_orders, used_order_ids
-        )
         if matching_order:
             display_matched_order(matching_order, memo_generator)
         else:
@@ -897,7 +721,7 @@ def process_transaction(
 
 
 def _handle_categorize(
-    transaction: dict[str, Any],
+    transaction: Mapping[str, Any],
     matching_order: Order | None,
     original_memo: str,
     memo_generator: MemoGenerator,
@@ -915,7 +739,7 @@ def _handle_categorize(
     When ``dry_run`` is True the preview is shown but no update is sent to YNAB.
     """
     transaction_id = transaction["id"]
-    updated_payload_dict: dict[str, Any] | None = None
+    updated_payload_dict: TransactionUpdate | None = None
 
     # Check if we should offer splitting
     should_offer_split = bool(
@@ -948,9 +772,7 @@ def _handle_categorize(
         memo_input = resolve_memo(matching_order, original_memo, memo_generator)
 
         updated_payload_dict = build_single_payload(
-            transaction,
-            category_id,
-            memo_input if memo_input else original_memo,
+            category_id, memo_input if memo_input else original_memo
         )
     else:
         # --- SPLITTING ---
@@ -963,7 +785,7 @@ def _handle_categorize(
         )
         if subtransactions:
             updated_payload_dict = build_split_payload(
-                transaction, subtransactions, matching_order, original_memo
+                subtransactions, matching_order, original_memo
             )
         else:
             print("Splitting cancelled. No changes will be made.")
@@ -999,67 +821,6 @@ def _handle_categorize(
     return "continue"
 
 
-# --- Batch Mode ---
-
-
-def process_batch(
-    transactions: list[dict[str, Any]],
-    parsed_orders: list[Order] | None,
-    memo_generator: MemoGenerator,
-    ynab_client: YNABClient,
-    dry_run: bool = False,
-) -> tuple[int, int, int]:
-    """Auto-enrich memos for confidently-matched transactions without prompting.
-
-    Only the memo is set (items + order link); the category is left untouched so
-    the transaction stays uncategorized for later review. Transactions with no
-    match or an ambiguous match are skipped.
-
-    Returns a ``(enriched, skipped, failed)`` tuple.
-    """
-    matcher = TransactionMatcher()
-    used_order_ids: set[str] = set()
-    enriched = skipped = failed = 0
-
-    for t in transactions:
-        amount_float = t["amount"] / 1000.0
-        order = matcher.find_confident_match(
-            amount_float, t["date"], parsed_orders or [], used_order_ids
-        )
-        if order is None:
-            skipped += 1
-            continue
-
-        memo = build_batch_memo(order, memo_generator)
-        payload = build_memo_only_payload(t, memo)
-        payee = t.get("payee_name", "N/A")
-        summary = memo.splitlines()[0] if memo else ""
-
-        if dry_run:
-            print(f"  [dry-run] would enrich {payee} ${amount_float:.2f}: {summary}")
-            if order.order_id:
-                used_order_ids.add(order.order_id)
-            enriched += 1
-            continue
-
-        try:
-            ynab_client.update_transaction(t["id"], payload)
-            print(f"  ✓ Enriched {payee} ${amount_float:.2f}: {summary}")
-            if order.order_id:
-                used_order_ids.add(order.order_id)
-            enriched += 1
-        except (
-            YNABAPIError,
-            requests.exceptions.RequestException,
-            OSError,
-        ) as exc:
-            logger.error("Failed to enrich transaction %s: %s", t["id"], exc)
-            print(f"  ✗ Failed to enrich {payee} ${amount_float:.2f}: {exc}")
-            failed += 1
-
-    return enriched, skipped, failed
-
-
 # --- Main Script Logic ---
 
 
@@ -1068,8 +829,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="ynab-amazon-categorizer",
         description=(
-            "Auto-categorize Amazon transactions in YNAB with item-level "
-            "memos and category suggestions."
+            "Match Amazon orders to YNAB transactions with item-level memos "
+            "and guided categorization."
         ),
     )
     parser.add_argument(
@@ -1099,25 +860,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Main CLI entry point.
-
-    Thin wrapper around :func:`_main` so a Ctrl+C anywhere during the
-    interactive session (category prompts, order-data entry, split entry,
-    update confirmation, etc.) exits cleanly with a short message instead of
-    an uncaught traceback. Individual prompts intentionally let
-    ``KeyboardInterrupt`` propagate (see ``_prompt_line``) so this is the
-    single place it's handled.
-    """
-    try:
-        _main(argv)
-    except KeyboardInterrupt:
-        print("\n\nInterrupted (Ctrl+C). Exiting without further changes.")
-        sys.exit(130)
-
-
-def _main(argv: list[str] | None = None) -> None:
-    """Main CLI implementation."""
+def _run(argv: list[str] | None = None) -> int:
+    """Run the CLI workflow and return a process exit code."""
     args = _parse_args(argv)
     dry_run = args.dry_run
     include_reconciled = args.include_reconciled
@@ -1139,7 +883,7 @@ def _main(argv: list[str] | None = None) -> None:
         logger.error("Configuration error: %s", e)
         print("Please set environment variables or create a .env file.")
         print("See README.md for setup instructions.")
-        sys.exit(1)
+        return 1
 
     # Initialize YNAB client
     ynab_client = YNABClient(config.api_key, config.budget_id)
@@ -1157,11 +901,11 @@ def _main(argv: list[str] | None = None) -> None:
     ) as exc:
         logger.error("Failed to fetch categories: %s", exc)
         print(f"Could not fetch categories: {exc}")
-        sys.exit(1)
+        return 1
 
     if not categories_list:
         print("Exiting due to category fetch error or no usable categories found.")
-        sys.exit(1)
+        return 1
 
     category_completer_instance = CategoryCompleter(categories_list)
     print(f"\nFound {len(categories_list)} usable categories. Completion enabled.")
@@ -1184,7 +928,9 @@ def _main(argv: list[str] | None = None) -> None:
             print(f"✓ Parsed {len(parsed_orders)} orders from Amazon data")
             for order in parsed_orders[:3]:
                 print(
-                    f"  - Order {order.order_id}: ${getattr(order, 'total', 'N/A')} ({len(getattr(order, 'items', []))} items)"
+                    f"  - Order {order.order_id}: "
+                    f"{format_currency_amount(order.total, order.currency)} "
+                    f"({len(order.items)} items)"
                 )
             if len(parsed_orders) > 3:
                 print(f"  ... and {len(parsed_orders) - 3} more orders")
@@ -1203,7 +949,7 @@ def _main(argv: list[str] | None = None) -> None:
     ) as exc:
         logger.error("Failed to fetch transactions: %s", exc)
         print(f"Could not fetch transactions: {exc}")
-        sys.exit(1)
+        return 1
 
     reconciled_count = sum(
         1 for t in transactions_to_process if t.get("cleared") == "reconciled"
@@ -1228,7 +974,7 @@ def _main(argv: list[str] | None = None) -> None:
             f"\nBatch complete: {enriched} enriched, {skipped} skipped "
             f"(no/ambiguous match), {failed} failed."
         )
-        return
+        return 0
 
     # --- Process Transactions (Main Loop) ---
     used_order_ids: set[str] = set()
@@ -1249,7 +995,7 @@ def _main(argv: list[str] | None = None) -> None:
             stats,
         )
         if not should_continue:
-            sys.exit(0)
+            return 0
 
     # End of processing loop
     print("\nFinished processing transactions.")
@@ -1259,7 +1005,17 @@ def _main(argv: list[str] | None = None) -> None:
             f"  ({auto_skipped} auto-skipped: no matching order data for that "
             "transaction)"
         )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI with clean handling for terminal cancellation."""
+    try:
+        return _run(argv)
+    except (EOFError, KeyboardInterrupt):
+        print("\nOperation cancelled. No further changes were made.")
+        return 130
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

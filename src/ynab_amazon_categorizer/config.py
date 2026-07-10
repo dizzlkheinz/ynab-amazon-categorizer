@@ -30,18 +30,11 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        # Load .env file if available — only search up to 5 parent levels
+        # Load only the explicitly selected working directory's .env file.
         if DOTENV_AVAILABLE:
-            env_path = Path.cwd()
-            for _ in range(5):
-                env_file = env_path / ".env"
-                if env_file.exists():
-                    load_dotenv(env_file)
-                    break
-                parent = env_path.parent
-                if parent == env_path:
-                    break
-                env_path = parent
+            env_file = Path.cwd() / ".env"
+            if env_file.is_file():
+                load_dotenv(env_file, override=False)
 
         api_key = os.getenv("YNAB_API_KEY")
         budget_id = os.getenv("YNAB_BUDGET_ID")

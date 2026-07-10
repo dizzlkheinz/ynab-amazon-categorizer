@@ -5,7 +5,7 @@ Repository instructions for coding agents working on this project.
 
 ## Project Overview
 
-This is a Python CLI tool that auto-categorizes Amazon transactions in YNAB with item-level memo enrichment and category suggestions.
+This is a Python CLI tool that matches Amazon orders to YNAB transactions with item-level memo enrichment and guided categorization.
 
 ## Setup and Validation Commands
 
@@ -40,6 +40,10 @@ Current modules:
 - `src/ynab_amazon_categorizer/memo_generator.py` - memo and order-link generation.
 - `src/ynab_amazon_categorizer/ynab_client.py` - YNAB API communication.
 - `src/ynab_amazon_categorizer/config.py` - environment config loading/validation.
+- `src/ynab_amazon_categorizer/models.py` - typed domain and YNAB payload models.
+- `src/ynab_amazon_categorizer/payloads.py` - minimal YNAB update construction.
+- `src/ynab_amazon_categorizer/transactions.py` - transaction validation and Amazon-payee filtering.
+- `src/ynab_amazon_categorizer/batch.py` - non-interactive matching and memo enrichment policy.
 
 Design principles:
 - Keep modules single-purpose and composable.
@@ -52,7 +56,7 @@ Data flow:
 2. Parser extracts orders and item details.
 3. Tool fetches uncategorized YNAB transactions.
 4. Matcher pairs orders with transactions using amount/date heuristics.
-5. CLI suggests category updates and split transactions.
+5. CLI guides category updates and split transactions.
 6. Tool updates YNAB memos/categories via API.
 
 Matching and memo behavior:
@@ -76,7 +80,6 @@ YNAB_ACCOUNT_ID=none
 
 - `requests` - YNAB API calls
 - `prompt_toolkit` - interactive CLI UX
-- `pydantic` - data models/validation
 - `python-dotenv` - `.env` loading
 
 ## Security Notes

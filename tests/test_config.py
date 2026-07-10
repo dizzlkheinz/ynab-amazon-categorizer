@@ -1,9 +1,12 @@
 """Tests for configuration management."""
 
+from pathlib import Path
+
 import pytest
 
 import ynab_amazon_categorizer.config as config_module
 from ynab_amazon_categorizer.config import Config
+from ynab_amazon_categorizer.exceptions import ConfigurationError
 
 
 def test_config_from_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,10 +29,47 @@ def test_config_missing_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("YNAB_BUDGET_ID", raising=False)
     monkeypatch.delenv("YNAB_ACCOUNT_ID", raising=False)
 
-    from ynab_amazon_categorizer.exceptions import ConfigurationError
+    with pytest.raises(ConfigurationError):
+        Config.from_env()
+
+
+def test_config_does_not_load_dotenv_from_parent_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Running in a child directory cannot silently adopt parent credentials."""
+    parent = tmp_path / "parent"
+    child = parent / "child"
+    child.mkdir(parents=True)
+    (parent / ".env").write_text(
+        "YNAB_API_KEY=parent-key\nYNAB_BUDGET_ID=parent-budget\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(child)
+    monkeypatch.setattr(config_module, "DOTENV_AVAILABLE", True)
+    monkeypatch.delenv("YNAB_API_KEY", raising=False)
+    monkeypatch.delenv("YNAB_BUDGET_ID", raising=False)
 
     with pytest.raises(ConfigurationError):
         Config.from_env()
+
+
+def test_config_loads_dotenv_from_current_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A .env in the explicit working directory remains supported."""
+    (tmp_path / ".env").write_text(
+        "YNAB_API_KEY=local-key\nYNAB_BUDGET_ID=local-budget\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_module, "DOTENV_AVAILABLE", True)
+    monkeypatch.delenv("YNAB_API_KEY", raising=False)
+    monkeypatch.delenv("YNAB_BUDGET_ID", raising=False)
+
+    config = Config.from_env()
+
+    assert config.api_key == "local-key"
+    assert config.budget_id == "local-budget"
 
 
 def test_config_amazon_domain_override(monkeypatch: pytest.MonkeyPatch) -> None:

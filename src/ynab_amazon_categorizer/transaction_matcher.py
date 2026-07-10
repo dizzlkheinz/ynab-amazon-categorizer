@@ -36,10 +36,12 @@ class TransactionMatcher:
         transaction_date: str,
         parsed_orders: Sequence[Order],
         used_order_ids: set[str] | None = None,
+        max_date_diff_days: int = 14,
     ) -> Order | None:
         """Find the best matching order for a transaction.
 
-        Matching requires an exact amount match (within 1 cent).
+        Matching requires an exact amount match (within 1 cent) and, when both
+        dates are parseable, a date within ``max_date_diff_days``.
         Ties are broken by date proximity, then by order ID for determinism.
 
         Orders whose ``order_id`` appears in ``used_order_ids`` are skipped so a
@@ -79,6 +81,8 @@ class TransactionMatcher:
                 order_date = _parse_order_date(order.date_str)
                 if order_date:
                     date_diff = abs((trans_date - order_date).days)
+                    if date_diff > max_date_diff_days:
+                        continue
                     if date_diff <= 1:  # Same or next day
                         score += 30
                     elif date_diff <= 3:  # Within 3 days

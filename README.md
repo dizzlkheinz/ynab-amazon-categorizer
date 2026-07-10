@@ -10,8 +10,13 @@ When you paste in the text from your Amazon order page:
 📝 **Enhanced Memos**: Generates detailed memos with item names and direct Amazon order links  
 🔄 **Intelligent Splitting**: Suggests splitting transactions with multiple items into separate categories  
 ⚡ **Streamlined Workflow**: Smart defaults and tab completion for fast categorization  
+📚 **Digital Orders**: Recognizes physical, digital, and subscription order IDs
 🌍 **UTF-8 Support**: Full emoji support in category names  
 📊 **Rich Previews**: Shows category names and transaction details before updating  
+
+The parser supports English-language Amazon order pages with month-first or
+day-first English dates and `$`, `CA$`, `US$`, `£`, or `€` totals. Translated
+order-page labels and comma-decimal totals are not currently supported.
 
 ## Prerequisites
 
@@ -60,6 +65,9 @@ YNAB_API_KEY=your_api_key_here
 YNAB_BUDGET_ID=your_budget_id_here
 YNAB_ACCOUNT_ID=none
 ```
+
+For predictable credential selection, only the current working directory is
+checked; parent directories are not searched for `.env` files.
 
 ### Alternative: Environment Variables
 ```bash
@@ -123,6 +131,10 @@ high-confidence order match (unique exact-amount match within ~7 days), the
 tool sets the memo (items + order link) automatically and **leaves the category
 unchanged**, so you can still review/categorize later. Transactions with no
 match or an ambiguous match are skipped.
+
+Existing memo text is preserved and the Amazon context is appended. If the
+existing memo is too long to retain in full alongside at least the order link,
+the transaction is skipped rather than truncating user data.
 
 ```bash
 # Preview what batch mode would enrich

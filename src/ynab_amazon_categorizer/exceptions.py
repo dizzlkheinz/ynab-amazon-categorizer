@@ -37,3 +37,9 @@ class YNABValidationError(YNABAPIError):
     """Raised when YNAB API rejects the request payload (400)."""
 
     pass
+
+
+class YNABResponseError(YNABAPIError):
+    """Raised when a successful YNAB response has invalid JSON or schema."""
+
+    pass
