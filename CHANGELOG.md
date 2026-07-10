@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Typed domain and YNAB update models, plus dedicated minimal payload builders.
+- A batch dry-run smoke test and a 65% minimum coverage gate in CI.
+- Digital and subscription order parsing, qualified-dollar/pound/euro totals, and day-first English order dates.
+- CI now installs the built wheel in a clean environment and smoke-tests its CLI entry point.
+- Focused transaction-selection and batch-processing modules extracted from the interactive CLI.
+
+### Changed
+
+- Interactive order matches now reject exact-amount orders more than 14 days away.
+- CLI and package descriptions now reflect guided categorization rather than automatic category suggestions.
+- `.env` discovery is limited to the current working directory instead of silently searching parent directories.
+
+### Fixed
+
+- Batch enrichment now preserves existing memo text, remains idempotent, and skips updates that would truncate user content.
+- Transaction updates no longer resend unrelated date, amount, payee, category, clearing, flag, or import fields from stale snapshots.
+- Invalid or structurally unexpected YNAB responses now raise a typed API response error instead of crashing or appearing as empty data.
+- YNAB transaction collections now validate required IDs, account IDs, ISO dates, milliunit amounts, and consumed optional fields before processing.
+- Amazon payee detection now uses standalone merchant markers, avoiding false positives such as “Ramzi Market.”
+- Ctrl+C and EOF at interactive prompts now exit cleanly with status 130 instead of exposing a traceback.
+
 ## [2.3.1] - 2026-07-09
 
 ### Fixed

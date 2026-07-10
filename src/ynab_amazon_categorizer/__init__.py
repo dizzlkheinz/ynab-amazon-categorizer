@@ -1,4 +1,4 @@
-"""YNAB Amazon Categorizer - Automatically categorize Amazon transactions in YNAB."""
+"""Match Amazon orders to YNAB transactions and guide categorization."""
 
 try:
     from importlib.metadata import PackageNotFoundError, version
@@ -16,6 +16,4 @@ except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
 __author__ = "dizzlkheinz"
-__description__ = (
-    "Automatically categorize Amazon transactions in YNAB with rich item information"
-)
+__description__ = "Match Amazon orders to YNAB transactions with rich item information"

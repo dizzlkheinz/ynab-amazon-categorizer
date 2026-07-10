@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
       - name: Run tests
-        run: uv run python -X utf8 -m pytest tests/ -v
+        run: uv run python -X utf8 -m pytest tests/ -v --cov=src --cov-report=term-missing
 
   lint:
     runs-on: ubuntu-latest
@@ -63,3 +63,26 @@ jobs:
         run: uv sync --extra dev
       - name: Run type checker
         run: uv run --extra dev ty check src tests
+
+  package:
+    name: build and smoke-test wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # setuptools-scm needs tags for the package version
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Install wheel in a clean environment
+        run: |
+          uv venv .package-venv
+          uv pip install --python .package-venv/bin/python dist/*.whl
+      - name: Smoke-test installed CLI
+        run: |
+          .package-venv/bin/python -c "import ynab_amazon_categorizer.batch, ynab_amazon_categorizer.transactions"
+          .package-venv/bin/ynab-amazon-categorizer --help

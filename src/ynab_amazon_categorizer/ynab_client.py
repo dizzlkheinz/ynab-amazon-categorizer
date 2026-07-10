@@ -1,6 +1,7 @@
 """YNAB API client functionality."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import requests
@@ -12,6 +13,7 @@ from .exceptions import (
     YNABAuthError,
     YNABNotFoundError,
     YNABRateLimitError,
+    YNABResponseError,
     YNABValidationError,
 )
 
@@ -67,11 +69,10 @@ class YNABClient:
         self.session.mount("https://", adapter)
         self.session.mount("http://", adapter)
 
-    def get_data(self, endpoint: str) -> dict[str, Any] | None:
+    def get_data(self, endpoint: str) -> dict[str, Any]:
         """Fetch data from YNAB API.
 
-        Returns the 'data' dict on success, or None if the response
-        has no 'data' key.
+        Returns the ``data`` dict on success.
 
         Raises typed YNAB exceptions on HTTP errors and
         ``requests.exceptions.RequestException`` on network failures.
@@ -81,15 +82,28 @@ class YNABClient:
         try:
             response = self.session.get(url, headers=headers, timeout=self.TIMEOUT)
             _raise_for_ynab_status(response)
-            json_res = response.json()
-            return json_res.get("data")
+            try:
+                json_res = response.json()
+            except ValueError as exc:
+                raise YNABResponseError(
+                    f"Invalid JSON response from {endpoint}"
+                ) from exc
+
+            if (
+                not isinstance(json_res, dict)
+                or "data" not in json_res
+                or not isinstance(json_res["data"], dict)
+            ):
+                raise YNABResponseError(
+                    f"Unexpected response structure from {endpoint}"
+                )
+            return json_res["data"]
         except (YNABAPIError, requests.exceptions.RequestException):
             raise
-        except (KeyError, ValueError) as exc:
-            logger.error("Unexpected response format from %s: %s", endpoint, exc)
-            return None
 
-    def update_transaction(self, transaction_id: str, payload: dict[str, Any]) -> bool:
+    def update_transaction(
+        self, transaction_id: str, payload: Mapping[str, object]
+    ) -> bool:
         """Update a YNAB transaction.
 
         Returns True on success.

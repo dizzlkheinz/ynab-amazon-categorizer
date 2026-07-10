@@ -4,26 +4,37 @@ from unittest.mock import Mock
 
 import pytest
 
+import ynab_amazon_categorizer.cli as cli_module
 from ynab_amazon_categorizer.amazon_parser import Order
+from ynab_amazon_categorizer.batch import process_batch
 from ynab_amazon_categorizer.cli import (
     _handle_categorize,
     _parse_args,
-    build_memo_only_payload,
     build_preview,
-    build_single_payload,
-    build_split_payload,
     compute_split_amount,
     display_matched_order,
-    fetch_amazon_transactions,
-    generate_split_summary_memo,
     handle_split,
     print_config_summary,
-    process_batch,
     process_transaction,
     resolve_memo,
 )
 from ynab_amazon_categorizer.config import Config
-from ynab_amazon_categorizer.memo_generator import MemoGenerator
+from ynab_amazon_categorizer.exceptions import YNABResponseError
+from ynab_amazon_categorizer.memo_generator import (
+    MemoGenerator,
+    build_batch_memo,
+    generate_split_summary_memo,
+)
+from ynab_amazon_categorizer.models import SaveSubtransaction
+from ynab_amazon_categorizer.payloads import (
+    build_memo_only_payload,
+    build_single_payload,
+    build_split_payload,
+)
+from ynab_amazon_categorizer.transactions import (
+    fetch_amazon_transactions,
+    is_amazon_payee,
+)
 
 # --- build_preview tests ---
 
@@ -96,37 +107,20 @@ def test_compute_split_amount_exceeds() -> None:
 
 
 def test_build_single_payload() -> None:
-    """Verify single-category payload structure."""
-    transaction = {
-        "id": "t1",
-        "account_id": "a1",
-        "date": "2025-01-15",
-        "amount": -15000,
-        "payee_id": "p1",
-        "payee_name": "Amazon",
-        "cleared": "uncleared",
-        "flag_color": None,
-        "import_id": "imp1",
-    }
-    result = build_single_payload(transaction, "cat1", "test memo")
+    """Single-category updates include only fields intentionally changed."""
+    result = build_single_payload("cat1", "test memo")
 
-    assert result["id"] == "t1"
-    assert result["category_id"] == "cat1"
-    assert result["memo"] == "test memo"
-    assert result["approved"] is True
-    assert result["amount"] == -15000
+    assert result == {
+        "category_id": "cat1",
+        "memo": "test memo",
+        "approved": True,
+    }
 
 
 def test_build_single_payload_sanitizes_long_memo() -> None:
     """Long memos are truncated via sanitize_memo."""
-    transaction = {
-        "id": "t1",
-        "account_id": "a1",
-        "date": "2025-01-15",
-        "amount": -15000,
-    }
     long_memo = "A" * 300
-    result = build_single_payload(transaction, "cat1", long_memo)
+    result = build_single_payload("cat1", long_memo)
     assert len(result["memo"]) <= 200
 
 
@@ -134,43 +128,29 @@ def test_build_single_payload_sanitizes_long_memo() -> None:
 
 
 def test_build_split_payload() -> None:
-    """Verify split payload structure."""
-    transaction = {
-        "id": "t1",
-        "account_id": "a1",
-        "date": "2025-01-15",
-        "amount": -15000,
-        "payee_id": "p1",
-        "payee_name": "Amazon",
-        "cleared": "uncleared",
-        "flag_color": None,
-        "import_id": "imp1",
-    }
-    subtransactions = [
+    """Split updates include only the requested split fields."""
+    subtransactions: list[SaveSubtransaction] = [
         {"amount": -10000, "category_id": "cat1", "memo": "item1"},
         {"amount": -5000, "category_id": "cat2", "memo": "item2"},
     ]
-    result = build_split_payload(transaction, subtransactions, None, "original")
+    result = build_split_payload(subtransactions, None, "original")
 
     assert result["category_id"] is None
     assert result["memo"] == "original"
     assert result["subtransactions"] == subtransactions
     assert result["approved"] is True
+    assert set(result) == {"category_id", "memo", "approved", "subtransactions"}
 
 
 def test_build_split_payload_with_order() -> None:
     """Split payload uses order items for summary memo."""
-    transaction = {
-        "id": "t1",
-        "account_id": "a1",
-        "date": "2025-01-15",
-        "amount": -15000,
-    }
     order = Order()
     order.items = ["Widget A", "Widget B"]
-    subtransactions = [{"amount": -10000, "category_id": "cat1", "memo": "item1"}]
+    subtransactions: list[SaveSubtransaction] = [
+        {"amount": -10000, "category_id": "cat1", "memo": "item1"}
+    ]
 
-    result = build_split_payload(transaction, subtransactions, order, "original")
+    result = build_split_payload(subtransactions, order, "original")
     assert "Widget A" in result["memo"]
     assert "Widget B" in result["memo"]
 
@@ -227,6 +207,20 @@ def test_print_config_summary_with_account(capsys: pytest.CaptureFixture[str]) -
 # --- fetch_amazon_transactions tests ---
 
 
+@pytest.mark.parametrize(
+    "payee_name", ["Amazon.com", "AMZN Mktp CA", "AMZ*Marketplace", "amazon.ca"]
+)
+def test_is_amazon_payee_accepts_vendor_markers(payee_name: str) -> None:
+    assert is_amazon_payee(payee_name) is True
+
+
+@pytest.mark.parametrize(
+    "payee_name", ["Ramzi Market", "Glamzone", "Amazing Store", ""]
+)
+def test_is_amazon_payee_rejects_substring_false_positives(payee_name: str) -> None:
+    assert is_amazon_payee(payee_name) is False
+
+
 def test_fetch_amazon_transactions_filters_correctly() -> None:
     """Verify that fetch_amazon_transactions filters to uncategorized Amazon transactions."""
     mock_client = Mock()
@@ -234,6 +228,8 @@ def test_fetch_amazon_transactions_filters_correctly() -> None:
         "transactions": [
             {
                 "id": "t1",
+                "account_id": "a1",
+                "date": "2025-01-01",
                 "payee_name": "Amazon.com",
                 "category_id": None,
                 "cleared": "uncleared",
@@ -244,6 +240,8 @@ def test_fetch_amazon_transactions_filters_correctly() -> None:
             },
             {
                 "id": "t2",
+                "account_id": "a1",
+                "date": "2025-01-02",
                 "payee_name": "Grocery Store",
                 "category_id": None,
                 "cleared": "uncleared",
@@ -254,6 +252,8 @@ def test_fetch_amazon_transactions_filters_correctly() -> None:
             },
             {
                 "id": "t3",
+                "account_id": "a1",
+                "date": "2025-01-03",
                 "payee_name": "AMZN Mktp US",
                 "category_id": "cat1",  # already categorized
                 "cleared": "uncleared",
@@ -273,14 +273,39 @@ def test_fetch_amazon_transactions_filters_correctly() -> None:
 
 
 def test_fetch_amazon_transactions_empty_response() -> None:
-    """Returns empty list when API returns no data."""
+    """Returns an empty list when the API returns an empty transaction list."""
     mock_client = Mock()
-    mock_client.get_data.return_value = None
+    mock_client.get_data.return_value = {"transactions": []}
     config = Config(api_key="key", budget_id="budget", account_id=None)
 
     result = fetch_amazon_transactions(mock_client, config)
 
     assert result == []
+
+
+@pytest.mark.parametrize("response", [None, {}, {"transactions": "not-a-list"}])
+def test_fetch_amazon_transactions_rejects_malformed_collection(
+    response: object,
+) -> None:
+    """A malformed collection cannot masquerade as no matching transactions."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = response
+    config = Config(api_key="key", budget_id="budget", account_id=None)
+
+    with pytest.raises(YNABResponseError, match="transactions collection"):
+        fetch_amazon_transactions(mock_client, config)
+
+
+def test_fetch_amazon_transactions_rejects_malformed_item() -> None:
+    """Required transaction fields are validated with item context."""
+    mock_client = Mock()
+    mock_client.get_data.return_value = {
+        "transactions": [{"id": "t1", "payee_name": "Amazon", "amount": "5.00"}]
+    }
+    config = Config(api_key="key", budget_id="budget", account_id=None)
+
+    with pytest.raises(YNABResponseError, match="transaction at index 0"):
+        fetch_amazon_transactions(mock_client, config)
 
 
 def test_fetch_amazon_transactions_with_account_id() -> None:
@@ -303,6 +328,8 @@ def test_fetch_amazon_transactions_includes_manual() -> None:
         "transactions": [
             {
                 "id": "t1",
+                "account_id": "a1",
+                "date": "2025-01-01",
                 "payee_name": "Amazon.com",
                 "category_id": None,
                 "cleared": "uncleared",
@@ -603,21 +630,49 @@ def test_parse_args_batch_flag() -> None:
     assert args.batch is True and args.dry_run is True
 
 
-def test_build_memo_only_payload_preserves_category_and_approved() -> None:
-    """Memo-only payload changes the memo but leaves category/approved untouched."""
-    transaction = {
-        "id": "t1",
-        "account_id": "a1",
-        "date": "2025-01-15",
-        "amount": -15000,
-        "category_id": None,
-        "approved": False,
-    }
-    result = build_memo_only_payload(transaction, "Widget A\n https://example/order")
+@pytest.mark.parametrize("approved", [False, True])
+def test_build_memo_only_payload_contains_only_intentional_fields(
+    approved: bool,
+) -> None:
+    """Memo updates preserve approval without resending unrelated fields."""
+    result = build_memo_only_payload("Widget A\n https://example/order", approved)
 
-    assert result["category_id"] is None
-    assert result["approved"] is False
-    assert "Widget A" in result["memo"]
+    assert result == {
+        "memo": "Widget A\n https://example/order",
+        "approved": approved,
+    }
+
+
+def test_build_batch_memo_preserves_existing_memo() -> None:
+    """Batch enrichment appends order context without losing an existing memo."""
+    order = _batch_order()
+
+    result = build_batch_memo(order, MemoGenerator(), "KEEP THIS NOTE")
+
+    assert result is not None
+    assert result.startswith("KEEP THIS NOTE")
+    assert "Widget A" in result
+    assert order.order_id is not None
+    assert order.order_id in result
+
+
+def test_build_batch_memo_is_idempotent() -> None:
+    """Rebuilding a generated memo does not duplicate its order context."""
+    order = _batch_order()
+    first = build_batch_memo(order, MemoGenerator())
+    assert first is not None
+
+    second = build_batch_memo(order, MemoGenerator(), first)
+
+    assert second == first
+
+
+def test_build_batch_memo_refuses_to_truncate_existing_memo() -> None:
+    """An existing memo is never shortened merely to add enrichment."""
+    order = _batch_order()
+    existing = "X" * 195
+
+    assert build_batch_memo(order, MemoGenerator(), existing) is None
 
 
 def _batch_txn(txn_id: str, amount: int) -> dict:
@@ -629,6 +684,7 @@ def _batch_txn(txn_id: str, amount: int) -> dict:
         "payee_name": "Amazon",
         "category_id": None,
         "approved": False,
+        "memo": "",
     }
 
 
@@ -655,8 +711,8 @@ def test_process_batch_enriches_confident_match() -> None:
     client.update_transaction.assert_called_once()
     txn_id, payload = client.update_transaction.call_args[0]
     assert txn_id == "t1"
-    assert payload["category_id"] is None
     assert "Widget A" in payload["memo"]
+    assert set(payload) == {"memo", "approved"}
 
 
 def test_process_batch_skips_ambiguous() -> None:
@@ -693,3 +749,89 @@ def test_process_batch_counts_failure() -> None:
     )
 
     assert (enriched, skipped, failed) == (0, 0, 1)
+
+
+def test_process_batch_preserves_existing_memo() -> None:
+    """The batch update sent to YNAB retains pre-existing memo content."""
+    client = Mock()
+    transaction = _batch_txn("t1", -20000)
+    transaction["memo"] = "Imported reference 123"
+
+    result = process_batch([transaction], [_batch_order()], MemoGenerator(), client)
+
+    assert result == (1, 0, 0)
+    payload = client.update_transaction.call_args.args[1]
+    assert payload["memo"].startswith("Imported reference 123")
+    assert set(payload) == {"memo", "approved"}
+    assert payload["approved"] is False
+
+
+def test_process_batch_skips_when_existing_memo_cannot_be_preserved() -> None:
+    """Batch mode skips rather than truncating a nearly-full existing memo."""
+    client = Mock()
+    transaction = _batch_txn("t1", -20000)
+    transaction["memo"] = "X" * 195
+
+    result = process_batch([transaction], [_batch_order()], MemoGenerator(), client)
+
+    assert result == (0, 1, 0)
+    client.update_transaction.assert_not_called()
+
+
+def test_main_batch_dry_run_smoke(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The top-level batch dry-run completes without sending an update."""
+    config = Config("secret", "budget")
+    client = Mock()
+    client.get_categories.return_value = (
+        [("Needs: Household", "cat1")],
+        {"needs: household": "cat1"},
+        {"cat1": "Needs: Household"},
+    )
+    transaction = _batch_txn("t1", -20000)
+
+    monkeypatch.setattr(Config, "from_env", classmethod(lambda cls: config))
+    monkeypatch.setattr(cli_module, "YNABClient", lambda *_args: client)
+    monkeypatch.setattr(cli_module, "_prompt_line", lambda _message: "y")
+    monkeypatch.setattr(
+        cli_module, "prompt_for_amazon_orders_data", lambda: [_batch_order()]
+    )
+    monkeypatch.setattr(
+        cli_module, "fetch_amazon_transactions", lambda *_args: [transaction]
+    )
+
+    exit_code = cli_module.main(["--batch", "--dry-run"])
+
+    client.update_transaction.assert_not_called()
+    assert exit_code == 0
+    assert "Batch complete: 1 enriched" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("interrupt", [KeyboardInterrupt(), EOFError()])
+def test_main_handles_terminal_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    interrupt: BaseException,
+) -> None:
+    """Ctrl+C and EOF exit cleanly without exposing a traceback."""
+    config = Config("secret", "budget")
+    client = Mock()
+    client.get_categories.return_value = (
+        [("Needs: Household", "cat1")],
+        {"needs: household": "cat1"},
+        {"cat1": "Needs: Household"},
+    )
+
+    monkeypatch.setattr(Config, "from_env", classmethod(lambda cls: config))
+    monkeypatch.setattr(cli_module, "YNABClient", lambda *_args: client)
+
+    def interrupt_prompt(_message: str) -> str:
+        raise interrupt
+
+    monkeypatch.setattr(cli_module, "_prompt_line", interrupt_prompt)
+
+    exit_code = cli_module.main([])
+
+    assert exit_code == 130
+    assert "Operation cancelled" in capsys.readouterr().out

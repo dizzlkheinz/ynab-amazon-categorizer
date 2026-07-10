@@ -3,6 +3,8 @@
 import re
 from typing import Any
 
+from .models import Order
+
 # YNAB memo field maximum length (API rejects longer values)
 YNAB_MEMO_MAX_LENGTH = 200
 
@@ -38,6 +40,53 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
             return link
     # Simple truncation with ellipsis
     return memo[: max_length - 3].rstrip() + "..."
+
+
+def generate_split_summary_memo(order: Order) -> str:
+    """Generate a compact summary of every parsed item in an order."""
+    items = order.items
+    if not items:
+        return ""
+    if len(items) == 1:
+        return sanitize_memo(items[0])
+
+    summary = f"{len(items)} Items:\n" + "\n".join(f"- {item}" for item in items)
+    return sanitize_memo(summary)
+
+
+def build_batch_memo(
+    order: Order,
+    memo_generator: "MemoGenerator",
+    original_memo: str = "",
+) -> str | None:
+    """Build an idempotent enrichment without truncating an existing memo.
+
+    When all order context cannot fit, retaining the existing memo plus the
+    order link is preferred. ``None`` means enrichment would require losing
+    existing content and the caller should skip the update.
+    """
+    items_text = generate_split_summary_memo(order) or "Amazon Purchase"
+    order_link = memo_generator.generate_amazon_order_link(order.order_id)
+    enrichment = f"{items_text}\n {order_link}" if order_link else items_text
+    original = sanitize_memo(original_memo)
+
+    if not original:
+        return sanitize_memo(enrichment)
+
+    idempotency_marker = order_link or items_text
+    if idempotency_marker and idempotency_marker in original:
+        return original
+
+    candidate = f"{original}\n{enrichment}"
+    if len(candidate) <= YNAB_MEMO_MAX_LENGTH:
+        return sanitize_memo(candidate)
+
+    if order_link:
+        link_only_candidate = f"{original}\n{order_link}"
+        if len(link_only_candidate) <= YNAB_MEMO_MAX_LENGTH:
+            return sanitize_memo(link_only_candidate)
+
+    return None
 
 
 class MemoGenerator:

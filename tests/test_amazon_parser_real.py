@@ -1,5 +1,7 @@
 """Tests for real Amazon order parsing functionality."""
 
+import pytest
+
 from ynab_amazon_categorizer.amazon_parser import AmazonParser
 
 
@@ -108,14 +110,8 @@ def test_parse_returned_order_items_survive() -> None:
     assert not any("refund" in item.lower() for item in order.items)
 
 
-def test_parse_digital_order_is_known_gap() -> None:
-    """KNOWN LIMITATION (guard, not desired behaviour): digital order numbers use a
-    ``D01-`` style prefix that the physical-order regex (``\\d{3}-\\d{7}-\\d{7}``) does
-    not match, so digital orders are currently skipped rather than mis-parsed.
-
-    If the parser is later taught to handle digital orders, update this test to
-    assert the title is extracted instead of expecting an empty result.
-    """
+def test_parse_digital_order() -> None:
+    """Digital ``D01`` orders are parsed with their title and total."""
     order_text = """
     Order placed December 1, 2024
     Total $14.99
@@ -128,8 +124,41 @@ def test_parse_digital_order_is_known_gap() -> None:
     parser = AmazonParser()
     orders = parser.parse_orders_page(order_text)
 
-    # Documents current behaviour: no false match (no crash, no wrong order).
-    assert orders == []
+    assert len(orders) == 1
+    assert orders[0].order_id == "D01-2345678-9012345"
+    assert orders[0].total == 14.99
+    assert "Pragmatic Programmer" in " ".join(orders[0].items)
+
+
+@pytest.mark.parametrize("currency", ["£", "€", "CA$", "US$"])
+def test_parse_supported_currency_prefixes(currency: str) -> None:
+    """English Amazon sites may qualify dollars or use pound/euro symbols."""
+    order_text = f"""
+    Order placed December 1, 2024
+    Total {currency}1,234.56
+    Order # 702-2345678-9012345
+    International Product Name With Enough Words To Parse
+    """
+
+    orders = AmazonParser().parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].total == 1234.56
+
+
+def test_parse_day_first_english_date_normalizes_for_matching() -> None:
+    """Day-first dates are normalized to the matcher's canonical date format."""
+    order_text = """
+    Order placed 1 December 2024
+    Total £14.99
+    Order # 702-2345678-9012345
+    International Product Name With Enough Words To Parse
+    """
+
+    orders = AmazonParser().parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].date_str == "December 1, 2024"
 
 
 def test_parse_multi_order_page_mixed_layouts() -> None:

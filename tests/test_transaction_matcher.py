@@ -47,6 +47,16 @@ def test_find_matching_order_no_match() -> None:
     assert result is None
 
 
+def test_find_matching_order_rejects_stale_exact_amount_match() -> None:
+    """An old same-amount order is not presented as a current match."""
+    matcher = TransactionMatcher()
+    order = _make_order(total=57.57, date_str="January 1, 2024")
+
+    result = matcher.find_matching_order(57.57, "2024-03-01", [order])
+
+    assert result is None
+
+
 def test_find_matching_order_close_amount_no_match() -> None:
     """Test close amount does not match when exact matching is required."""
     matcher = TransactionMatcher()

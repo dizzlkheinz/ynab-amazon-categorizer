@@ -12,6 +12,7 @@ from ynab_amazon_categorizer.exceptions import (
     YNABAuthError,
     YNABNotFoundError,
     YNABRateLimitError,
+    YNABResponseError,
     YNABValidationError,
 )
 from ynab_amazon_categorizer.ynab_client import YNABClient
@@ -47,6 +48,33 @@ def test_get_data_success() -> None:
         headers={"Authorization": "Bearer test_key"},
         timeout=30,
     )
+
+
+@pytest.mark.parametrize("body", [[], None, {"unexpected": "shape"}])
+def test_get_data_rejects_wrong_response_shape(body: object) -> None:
+    """A successful response with the wrong schema raises a typed error."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock(status_code=200)
+    mock_response.json.return_value = body
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABResponseError, match="Unexpected response"),
+    ):
+        client.get_data("/test/endpoint")
+
+
+def test_get_data_rejects_invalid_json() -> None:
+    """Invalid JSON cannot be mistaken for an empty successful response."""
+    client = YNABClient("test_key", "test_budget")
+    mock_response = Mock(status_code=200)
+    mock_response.json.side_effect = ValueError("invalid json")
+
+    with (
+        patch.object(client.session, "get", return_value=mock_response),
+        pytest.raises(YNABResponseError, match="Invalid JSON"),
+    ):
+        client.get_data("/test/endpoint")
 
 
 def test_get_data_request_error() -> None:

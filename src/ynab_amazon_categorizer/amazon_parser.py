@@ -2,14 +2,31 @@
 
 import logging
 import re
+from datetime import datetime
+
+from .models import Order
 
 logger = logging.getLogger(__name__)
 
 # Maximum items to extract per order (keeps memos manageable)
 MAX_ITEMS_PER_ORDER = 10
 
+ORDER_START_LABEL = r"(?:Order placed|Subscription charged on|Digital order placed)"
+ORDER_DATE_PATTERN = r"(?:[A-Za-z]+ \d{1,2}, \d{4}|\d{1,2} [A-Za-z]+ \d{4})"
+CURRENCY_PREFIX_PATTERN = r"(?:C(?:A|DN)\$|US\$|[$£€])"
+ORDER_ID_PATTERN = r"(?:(?:\d{3}|D\d{2})-\d{7}-\d{7})"
+
+ORDER_HEADER_PATTERN = re.compile(
+    rf"{ORDER_START_LABEL}\s*"
+    rf"(?P<date>{ORDER_DATE_PATTERN})\s*"
+    rf"Total\s*{CURRENCY_PREFIX_PATTERN}\s*"
+    rf"(?P<total>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)\s*"
+    rf".*?Order #\s*(?P<order_id>{ORDER_ID_PATTERN})",
+    re.DOTALL | re.IGNORECASE,
+)
+
 ORDER_CONTENT_BOUNDARY_PATTERN = re.compile(
-    r"^\s*(?:Order placed|Subscription charged on|Digital order placed)\b",
+    rf"^\s*{ORDER_START_LABEL}\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -29,31 +46,35 @@ ORDER_TAIL_SENTINEL_PATTERN = re.compile(
 )
 
 
-class Order:
-    """Represents a parsed Amazon order."""
-
-    def __init__(self) -> None:
-        self.order_id: str | None = None
-        self.total: float | None = None
-        self.date_str: str | None = None
-        self.items: list[str] = []
-
-
 class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
     def _remove_cancelled_orders(self, text: str) -> str:
         """Remove cancelled order blocks so their items don't bleed into adjacent orders."""
-        parts = re.split(r"(?=Order placed)", text)
+        parts = re.split(
+            rf"(?=^\s*{ORDER_START_LABEL}\b)",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
         kept = []
         for part in parts:
             if (
-                re.match(r"\s*Order placed", part)
-                and "Your order was cancelled" in part
+                re.match(rf"\s*{ORDER_START_LABEL}", part, re.IGNORECASE)
+                and "your order was cancelled" in part.lower()
             ):
                 continue
             kept.append(part)
         return "".join(kept)
+
+    def _normalize_order_date(self, date_str: str) -> str:
+        """Normalize supported English date layouts for the matcher."""
+        for date_format in ("%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y"):
+            try:
+                parsed = datetime.strptime(date_str, date_format)
+                return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+            except ValueError:
+                continue
+        return date_str
 
     def parse_orders_page(self, orders_text: str) -> list[Order]:
         """Parse Amazon orders page text to extract order information.
@@ -68,16 +89,12 @@ class AmazonParser:
 
         orders = []
 
-        # Find all order blocks using regex
-        order_pattern = r"Order placed\s*([A-Za-z]+ \d+, \d{4})\s*Total\s*\$([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*.*?Order # (\d{3}-\d{7}-\d{7})"
-        order_matches = list(
-            re.finditer(order_pattern, orders_text, re.DOTALL | re.IGNORECASE)
-        )
+        order_matches = list(ORDER_HEADER_PATTERN.finditer(orders_text))
 
         for idx, match in enumerate(order_matches):
-            order_date = match.group(1).strip()
-            order_total = float(match.group(2).replace(",", ""))
-            order_id = match.group(3)
+            order_date = self._normalize_order_date(match.group("date").strip())
+            order_total = float(match.group("total").replace(",", ""))
+            order_id = match.group("order_id")
 
             # Find the content after this order until the next order-like block or end
             start_pos = match.end()
@@ -92,11 +109,12 @@ class AmazonParser:
             items = self.extract_items_from_content(order_content)
 
             # Always keep the order even without items (partial order)
-            order = Order()
-            order.order_id = order_id
-            order.total = order_total
-            order.date_str = order_date
-            order.items = items
+            order = Order(
+                order_id=order_id,
+                total=order_total,
+                date_str=order_date,
+                items=items,
+            )
 
             if not items:
                 logger.info(
