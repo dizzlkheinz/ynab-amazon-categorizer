@@ -351,6 +351,33 @@ def test_fetch_amazon_transactions_includes_manual() -> None:
 # --- process_transaction display tests ---
 
 
+def test_prompt_for_orders_displays_parsed_currency_end_to_end(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The parser's currency survives through the first CLI order summary."""
+    monkeypatch.setattr(
+        cli_module,
+        "get_multiline_input_with_custom_submit",
+        lambda _prompt: (
+            """
+        Order placed January 15, 2025
+        Total £14.99
+        Order # 702-1234567-7654321
+        International Product Name With Enough Words To Parse
+        """
+        ),
+    )
+
+    orders = cli_module.prompt_for_amazon_orders_data()
+
+    assert orders is not None
+    assert orders[0].currency == "£"
+    captured = capsys.readouterr().out
+    assert "Order 702-1234567-7654321: £14.99" in captured
+    assert "Order 702-1234567-7654321: $14.99" not in captured
+
+
 def test_process_transaction_displays_inflow_amount_without_negating(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -384,6 +411,47 @@ def test_process_transaction_displays_inflow_amount_without_negating(
     assert result is True
     assert "Found inflow transaction: Amazon $10.00" in captured
     assert "Amount: 10.00" in captured
+
+
+def test_process_transaction_uses_matched_order_currency_for_inflow(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A matched non-dollar refund is not presented as a dollar transaction."""
+    transaction = {
+        "id": "t1",
+        "date": "2025-01-15",
+        "payee_name": "Amazon",
+        "amount": 10000,
+        "memo": "",
+    }
+    order = Order(
+        order_id="702-1234567-7654321",
+        total=10.00,
+        date_str="January 15, 2025",
+        currency="£",
+    )
+    responses = iter(["y", "s"])
+    monkeypatch.setattr(
+        "ynab_amazon_categorizer.cli._prompt_line", lambda _prompt: next(responses)
+    )
+
+    result = process_transaction(
+        transaction,
+        0,
+        1,
+        [order],
+        MemoGenerator(),
+        Mock(),
+        Mock(),
+        {},
+        {},
+    )
+
+    assert result is True
+    captured = capsys.readouterr().out
+    assert "Found inflow transaction: Amazon £10.00" in captured
+    assert "Found inflow transaction: Amazon $10.00" not in captured
 
 
 # --- generate_split_summary_memo tests ---
@@ -431,6 +499,25 @@ def test_display_matched_order_with_order_object(
     assert "702-1234567-7654321" in captured
     assert "42.99" in captured
     assert "Test Product" in captured
+
+
+def test_display_matched_order_uses_parsed_currency(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Matched totals retain their Amazon currency prefix during verification."""
+    order = Order(
+        order_id="702-1234567-7654321",
+        total=42.99,
+        date_str="January 15, 2025",
+        items=["Test Product"],
+        currency="£",
+    )
+
+    display_matched_order(order, MemoGenerator("amazon.co.uk"))
+
+    captured = capsys.readouterr().out
+    assert "Total: £42.99" in captured
+    assert "Total: $42.99" not in captured
 
 
 # --- handle_split tests ---
@@ -713,6 +800,27 @@ def test_process_batch_enriches_confident_match() -> None:
     assert txn_id == "t1"
     assert "Widget A" in payload["memo"]
     assert set(payload) == {"memo", "approved"}
+
+
+def test_process_batch_displays_matched_order_currency(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Batch transaction verification uses the matched order's currency."""
+    order = _batch_order()
+    order.currency = "€"
+
+    result = process_batch(
+        [_batch_txn("t1", -20000)],
+        [order],
+        MemoGenerator(),
+        Mock(),
+        dry_run=True,
+    )
+
+    assert result == (1, 0, 0)
+    captured = capsys.readouterr().out
+    assert "Amazon -€20.00" in captured
+    assert "Amazon -$20.00" not in captured
 
 
 def test_process_batch_skips_ambiguous() -> None:

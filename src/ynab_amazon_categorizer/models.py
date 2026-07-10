@@ -17,6 +17,15 @@ class Order:
     total: float | None = None
     date_str: str | None = None
     items: list[str] = field(default_factory=list)
+    currency: str | None = None
+
+
+def format_currency_amount(amount: float | None, currency: str | None = None) -> str:
+    """Format an amount with its parsed currency, defaulting legacy orders to dollars."""
+    if amount is None:
+        return "N/A"
+    sign = "-" if amount < 0 else ""
+    return f"{sign}{currency or '$'}{abs(amount):.2f}"
 
 
 class YNABTransaction(TypedDict):

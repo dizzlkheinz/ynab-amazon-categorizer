@@ -19,7 +19,7 @@ ORDER_ID_PATTERN = r"(?:(?:\d{3}|D\d{2})-\d{7}-\d{7})"
 ORDER_HEADER_PATTERN = re.compile(
     rf"{ORDER_START_LABEL}\s*"
     rf"(?P<date>{ORDER_DATE_PATTERN})\s*"
-    rf"Total\s*{CURRENCY_PREFIX_PATTERN}\s*"
+    rf"Total\s*(?P<currency>{CURRENCY_PREFIX_PATTERN})\s*"
     rf"(?P<total>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)\s*"
     rf".*?Order #\s*(?P<order_id>{ORDER_ID_PATTERN})",
     re.DOTALL | re.IGNORECASE,
@@ -35,7 +35,7 @@ ORDER_TAIL_SENTINEL_PATTERN = re.compile(
     r"[←<]?\s*Previous\b.*|"
     r"Next\s*[→>]?\s*$|"
     r"Sponsored\s*$|"
-    r"Learn more[ \t]*(?:\r?\n)[ \t]*\$\d|"
+    rf"Learn more[ \t]*(?:\r?\n)[ \t]*{CURRENCY_PREFIX_PATTERN}\s*\d|"
     r"Top .+ For You\s*$|"
     r"Get to Know Us\s*$|"
     r"Make Money with Us\s*$|"
@@ -94,6 +94,7 @@ class AmazonParser:
         for idx, match in enumerate(order_matches):
             order_date = self._normalize_order_date(match.group("date").strip())
             order_total = float(match.group("total").replace(",", ""))
+            order_currency = match.group("currency")
             order_id = match.group("order_id")
 
             # Find the content after this order until the next order-like block or end
@@ -114,6 +115,7 @@ class AmazonParser:
                 total=order_total,
                 date_str=order_date,
                 items=items,
+                currency=order_currency,
             )
 
             if not items:

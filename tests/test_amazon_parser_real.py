@@ -130,7 +130,7 @@ def test_parse_digital_order() -> None:
     assert "Pragmatic Programmer" in " ".join(orders[0].items)
 
 
-@pytest.mark.parametrize("currency", ["£", "€", "CA$", "US$"])
+@pytest.mark.parametrize("currency", ["$", "£", "€", "CA$", "CDN$", "US$"])
 def test_parse_supported_currency_prefixes(currency: str) -> None:
     """English Amazon sites may qualify dollars or use pound/euro symbols."""
     order_text = f"""
@@ -144,6 +144,31 @@ def test_parse_supported_currency_prefixes(currency: str) -> None:
 
     assert len(orders) == 1
     assert orders[0].total == 1234.56
+    assert orders[0].currency == currency
+
+
+@pytest.mark.parametrize("currency", ["$", "£", "€", "CA$", "CDN$", "US$"])
+def test_currency_specific_recommendation_footer_is_not_parsed_as_items(
+    currency: str,
+) -> None:
+    """Every accepted currency prefix also terminates recommendation content."""
+    order_text = f"""
+    Order placed December 1, 2024
+    Total {currency}14.99
+    Order # 702-2345678-9012345
+    Purchased International Product Name, Model 2-Pack To Parse
+
+    Learn more
+    {currency}180
+    Recommended International Product Name, Model 3-Pack Must Not Become An Item
+    """
+
+    orders = AmazonParser().parse_orders_page(order_text)
+
+    assert len(orders) == 1
+    assert orders[0].items == [
+        "Purchased International Product Name, Model 2-Pack To Parse"
+    ]
 
 
 def test_parse_day_first_english_date_normalizes_for_matching() -> None:

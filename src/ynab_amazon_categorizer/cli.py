@@ -22,7 +22,7 @@ from .memo_generator import (
     generate_split_summary_memo,
     sanitize_memo,
 )
-from .models import SaveSubtransaction, TransactionUpdate
+from .models import SaveSubtransaction, TransactionUpdate, format_currency_amount
 from .payloads import (
     build_single_payload,
     build_split_payload,
@@ -59,7 +59,10 @@ def prompt_for_amazon_orders_data() -> list[Order] | None:
     if parsed_orders:
         print(f"\n✓ Successfully parsed {len(parsed_orders)} orders from Amazon data")
         for order in parsed_orders[:3]:
-            print(f"  - Order {order.order_id}: ${order.total} on {order.date_str}")
+            print(
+                f"  - Order {order.order_id}: "
+                f"{format_currency_amount(order.total, order.currency)} on {order.date_str}"
+            )
         if len(parsed_orders) > 3:
             print(f"  ... and {len(parsed_orders) - 3} more orders")
     else:
@@ -294,7 +297,8 @@ def display_matched_order(matching_order: Order, memo_generator: MemoGenerator) 
     print("\n  🎯 MATCHED ORDER FOUND:")
     print(f"     Order ID: {matching_order.order_id}")
     print(
-        f"     Total: ${matching_order.total if matching_order.total is not None else 'N/A'}"
+        f"     Total: "
+        f"{format_currency_amount(matching_order.total, matching_order.currency)}"
     )
     print(
         f"     Date: {matching_order.date_str if matching_order.date_str is not None else 'N/A'}"
@@ -564,8 +568,19 @@ def process_transaction(
     amount_float = amount_milliunits / 1000.0
     original_memo = transaction.get("memo", "")
 
+    matching_order: Order | None = None
+    if parsed_orders:
+        transaction_matcher = TransactionMatcher()
+        matching_order = transaction_matcher.find_matching_order(
+            amount_float, date, parsed_orders, used_order_ids
+        )
+
     if amount_milliunits > 0:
-        print(f"Found inflow transaction: {payee} ${amount_float:.2f}")
+        currency = matching_order.currency if matching_order else None
+        print(
+            f"Found inflow transaction: {payee} "
+            f"{format_currency_amount(amount_float, currency)}"
+        )
         process_inflow = _prompt_line(
             "Process this inflow (refund/credit)? (y/n, default n): "
         ).lower()
@@ -577,17 +592,17 @@ def process_transaction(
     print(f"  ID:   {transaction_id}")
     print(f"  Date: {date}")
     print(f"  Payee: {payee}")
-    print(f"  Amount: {amount_float:.2f}")
+    amount_display = (
+        format_currency_amount(amount_float, matching_order.currency)
+        if matching_order
+        else f"{amount_float:.2f}"
+    )
+    print(f"  Amount: {amount_display}")
     if original_memo:
         print(f"  Original Memo: {original_memo}")
 
     # Try to find matching order from parsed data and show it
-    matching_order: Order | None = None
     if parsed_orders:
-        transaction_matcher = TransactionMatcher()
-        matching_order = transaction_matcher.find_matching_order(
-            amount_float, date, parsed_orders, used_order_ids
-        )
         if matching_order:
             display_matched_order(matching_order, memo_generator)
         else:
@@ -811,7 +826,9 @@ def _run(argv: list[str] | None = None) -> int:
             print(f"✓ Parsed {len(parsed_orders)} orders from Amazon data")
             for order in parsed_orders[:3]:
                 print(
-                    f"  - Order {order.order_id}: ${getattr(order, 'total', 'N/A')} ({len(getattr(order, 'items', []))} items)"
+                    f"  - Order {order.order_id}: "
+                    f"{format_currency_amount(order.total, order.currency)} "
+                    f"({len(order.items)} items)"
                 )
             if len(parsed_orders) > 3:
                 print(f"  ... and {len(parsed_orders) - 3} more orders")

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-07-10
+
 ### Added
 
 - Typed domain and YNAB update models, plus dedicated minimal payload builders.
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - YNAB transaction collections now validate required IDs, account IDs, ISO dates, milliunit amounts, and consumed optional fields before processing.
 - Amazon payee detection now uses standalone merchant markers, avoiding false positives such as “Ramzi Market.”
 - Ctrl+C and EOF at interactive prompts now exit cleanly with status 130 instead of exposing a traceback.
+- International currency prefixes are preserved in order and transaction displays, and recommendation footers using any accepted currency no longer leak suggested products into order items.
 
 ## [2.3.1] - 2026-07-09
 
