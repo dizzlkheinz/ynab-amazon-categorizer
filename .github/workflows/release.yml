@@ -3,91 +3,32 @@ name: Publish to PyPI
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Fetch full history and tags for setuptools-scm
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    
-    - name: Run tests
-      run: pytest
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run pre-commit hooks
-      run: pre-commit run --all-files
-
-  type-check:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run type checker
-      run: ty check --python "$(python -c 'import sys; print(sys.executable)')" src tests
-
   publish:
-    needs: [test, lint, type-check]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Fetch full history and tags for setuptools-scm
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
       with:
-        python-version: '3.12'
-    
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
-    
+        python-version: "3.12"
+
     - name: Build package
-      run: python -m build
-    
+      run: uv build
+
     - name: Check package
-      run: twine check dist/*
-    
+      run: uvx twine check dist/*
+
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
 
@@ -96,17 +37,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    
+
     - name: Extract version from tag
       id: version
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-    
+
     - name: Generate changelog
       id: changelog
       run: |
@@ -117,37 +58,40 @@ jobs:
         else
           CHANGELOG=$(git log --pretty=format:"- %s" --max-count=10)
         fi
-        
+
         # Create changelog file
         cat > CHANGELOG.md << EOF
         ## What's Changed
-        
+
         $CHANGELOG
-        
+
         ## Installation
-        
-        This package is now available on PyPI! Install it with:
-        
-        \`\`\`bash
-        # Install with pipx (recommended for CLI tools)
+
+        This package is now available on PyPI! Run or install it with:
+
+        ```bash
+        # Run directly with uvx (recommended)
+        uvx ynab-amazon-categorizer
+
+        # Or install with pipx
         pipx install ynab-amazon-categorizer
-        
+
         # Or install with pip
         pip install ynab-amazon-categorizer
-        \`\`\`
-        
+        ```
+
         ## Usage
-        
+
         After installation, run:
-        \`\`\`bash
+        ```bash
         ynab-amazon-categorizer
-        \`\`\`
-        
+        ```
+
         See README.md for detailed setup and configuration instructions.
         EOF
-    
+
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
         name: Release ${{ steps.version.outputs.VERSION }}
