@@ -22,7 +22,7 @@ class Config:
         budget_id: str,
         account_id: str | None = None,
         amazon_domain: str = "amazon.ca",
-    ):
+    ) -> None:
         self.api_key = api_key
         self.budget_id = budget_id
         self.account_id = account_id
@@ -30,6 +30,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        """Build a Config from the environment, loading a local .env first."""
         # Load only the explicitly selected working directory's .env file.
         if DOTENV_AVAILABLE:
             env_file = Path.cwd() / ".env"

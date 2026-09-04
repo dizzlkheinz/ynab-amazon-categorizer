@@ -56,11 +56,60 @@ def _apply_batch_enrichment(
     try:
         ynab_client.update_transaction(transaction["id"], payload)
         print(f"  ✓ Enriched {payee} {amount_display}: {summary}")
-        return True
     except (YNABAPIError, requests.exceptions.RequestException, OSError) as exc:
         logger.error("Failed to enrich transaction %s: %s", transaction["id"], exc)
         print(f"  ✗ Failed to enrich {payee} {amount_display}: {exc}")
         return False
+    else:
+        return True
+
+
+def _enrich_one(
+    transaction: Mapping[str, Any],
+    matcher: TransactionMatcher,
+    parsed_orders: list[Order] | None,
+    used_order_ids: set[str],
+    memo_generator: MemoGenerator,
+    ynab_client: YNABClient,
+    dry_run: bool,
+) -> str:
+    """Enrich one transaction, returning "enriched", "skipped", or "failed"."""
+    amount_float = transaction["amount"] / 1000.0
+    order = matcher.find_confident_match(
+        amount_float,
+        transaction["date"],
+        parsed_orders or [],
+        used_order_ids,
+    )
+    if order is None:
+        return "skipped"
+
+    # A confident match belongs to this transaction even when enrichment is
+    # unnecessary or impossible. Do not let a later same-amount transaction
+    # reuse the order merely because this transaction does not get updated.
+    if order.order_id:
+        used_order_ids.add(order.order_id)
+
+    memo = _resolve_batch_memo_candidate(transaction, order, memo_generator)
+    if memo is None:
+        return "skipped"
+
+    payload = build_memo_only_payload(memo, bool(transaction.get("approved", False)))
+    payee = transaction.get("payee_name", "N/A")
+    summary = memo.splitlines()[0] if memo else ""
+    amount_display = format_currency_amount(amount_float, order.currency)
+
+    if _apply_batch_enrichment(
+        transaction,
+        payload,
+        payee,
+        amount_display,
+        summary,
+        ynab_client,
+        dry_run,
+    ):
+        return "enriched"
+    return "failed"
 
 
 def process_batch(
@@ -73,43 +122,18 @@ def process_batch(
     """Auto-enrich confidently matched memos without changing categories."""
     matcher = TransactionMatcher()
     used_order_ids: set[str] = set()
-    enriched = skipped = failed = 0
+    counts = {"enriched": 0, "skipped": 0, "failed": 0}
 
     for transaction in transactions:
-        amount_float = transaction["amount"] / 1000.0
-        order = matcher.find_confident_match(
-            amount_float,
-            transaction["date"],
-            parsed_orders or [],
+        outcome = _enrich_one(
+            transaction,
+            matcher,
+            parsed_orders,
             used_order_ids,
+            memo_generator,
+            ynab_client,
+            dry_run,
         )
-        if order is None:
-            skipped += 1
-            continue
+        counts[outcome] += 1
 
-        # A confident match belongs to this transaction even when enrichment is
-        # unnecessary or impossible. Do not let a later same-amount transaction
-        # reuse the order merely because this transaction does not get updated.
-        if order.order_id:
-            used_order_ids.add(order.order_id)
-
-        memo = _resolve_batch_memo_candidate(transaction, order, memo_generator)
-        if memo is None:
-            skipped += 1
-            continue
-
-        payload = build_memo_only_payload(
-            memo, bool(transaction.get("approved", False))
-        )
-        payee = transaction.get("payee_name", "N/A")
-        summary = memo.splitlines()[0] if memo else ""
-        amount_display = format_currency_amount(amount_float, order.currency)
-
-        if _apply_batch_enrichment(
-            transaction, payload, payee, amount_display, summary, ynab_client, dry_run
-        ):
-            enriched += 1
-        else:
-            failed += 1
-
-    return enriched, skipped, failed
+    return counts["enriched"], counts["skipped"], counts["failed"]

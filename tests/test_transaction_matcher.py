@@ -12,7 +12,7 @@ def _make_order(
     date_str: str | None = "January 1, 2024",
     items: list[str] | None = None,
 ) -> Order:
-    """Helper to create Order objects for tests."""
+    """Create an Order object for tests."""
     order = Order()
     order.order_id = order_id
     order.total = total
@@ -157,7 +157,8 @@ def test_find_matching_order_deterministic_tie_break() -> None:
     result1 = matcher.find_matching_order(50.00, "2024-01-01", [order_b, order_a])
     result2 = matcher.find_matching_order(50.00, "2024-01-01", [order_a, order_b])
 
-    assert result1 is not None and result2 is not None
+    assert result1 is not None
+    assert result2 is not None
     assert result1.order_id == result2.order_id == "702-AAAAAAA-0000000"
 
 
@@ -203,7 +204,7 @@ def test_find_matching_order_used_falls_through_to_next() -> None:
 
 
 @pytest.mark.parametrize(
-    "trans_date,order_date,expected_bonus",
+    ("trans_date", "order_date", "expected_bonus"),
     [
         ("2024-01-01", "January 1, 2024", 30),  # same day
         ("2024-01-02", "January 1, 2024", 30),  # next day

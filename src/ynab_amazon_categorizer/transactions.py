@@ -46,7 +46,7 @@ def fetch_amazon_transactions(
             transactions.append(validate_ynab_transaction(raw_transaction))
         except ValueError as exc:
             raise YNABResponseError(
-                f"Unexpected transaction at index {index}: {exc}"
+                f"Unexpected transaction at index {index}: {exc}",
             ) from exc
 
     logger.info("Fetched %d transactions.", len(transactions))
@@ -58,7 +58,8 @@ def fetch_amazon_transactions(
 
 
 def _should_process(
-    transaction: YNABTransaction, include_reconciled: bool = False
+    transaction: YNABTransaction,
+    include_reconciled: bool = False,
 ) -> bool:
     payee_name = transaction.get("payee_name")
     return bool(
@@ -68,5 +69,5 @@ def _should_process(
         and (include_reconciled or transaction.get("cleared") != "reconciled")
         and transaction["amount"] != 0
         and transaction.get("transfer_account_id") is None
-        and not transaction.get("subtransactions")
+        and not transaction.get("subtransactions"),
     )

@@ -19,11 +19,17 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
+HTTP_BAD_REQUEST = 400
+HTTP_UNAUTHORIZED = 401
+HTTP_FORBIDDEN = 403
+HTTP_NOT_FOUND = 404
+HTTP_TOO_MANY_REQUESTS = 429
+
 
 def _raise_for_ynab_status(response: requests.Response) -> None:
     """Raise a typed exception based on YNAB API response status code."""
     status: int = response.status_code  # type: ignore[assignment]
-    if status < 400:
+    if status < HTTP_BAD_REQUEST:
         return
 
     try:
@@ -31,21 +37,25 @@ def _raise_for_ynab_status(response: requests.Response) -> None:
     except (ValueError, AttributeError):
         detail = response.text
 
-    if status == 401 or status == 403:
+    if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
         raise YNABAuthError(
-            f"Authentication failed ({status}): {detail}", status_code=status
+            f"Authentication failed ({status}): {detail}",
+            status_code=status,
         )
-    if status == 404:
+    if status == HTTP_NOT_FOUND:
         raise YNABNotFoundError(
-            f"Resource not found ({status}): {detail}", status_code=status
+            f"Resource not found ({status}): {detail}",
+            status_code=status,
         )
-    if status == 429:
+    if status == HTTP_TOO_MANY_REQUESTS:
         raise YNABRateLimitError(
-            f"Rate limit exceeded ({status}): {detail}", status_code=status
+            f"Rate limit exceeded ({status}): {detail}",
+            status_code=status,
         )
-    if status == 400:
+    if status == HTTP_BAD_REQUEST:
         raise YNABValidationError(
-            f"Validation error ({status}): {detail}", status_code=status
+            f"Validation error ({status}): {detail}",
+            status_code=status,
         )
     raise YNABAPIError(f"YNAB API error ({status}): {detail}", status_code=status)
 
@@ -79,30 +89,25 @@ class YNABClient:
         """
         headers = {"Authorization": f"Bearer {self.api_key}"}
         url = f"https://api.ynab.com/v1{endpoint}"
+        response = self.session.get(url, headers=headers, timeout=self.TIMEOUT)
+        _raise_for_ynab_status(response)
         try:
-            response = self.session.get(url, headers=headers, timeout=self.TIMEOUT)
-            _raise_for_ynab_status(response)
-            try:
-                json_res = response.json()
-            except ValueError as exc:
-                raise YNABResponseError(
-                    f"Invalid JSON response from {endpoint}"
-                ) from exc
+            json_res = response.json()
+        except ValueError as exc:
+            raise YNABResponseError(f"Invalid JSON response from {endpoint}") from exc
 
-            if (
-                not isinstance(json_res, dict)
-                or "data" not in json_res
-                or not isinstance(json_res["data"], dict)
-            ):
-                raise YNABResponseError(
-                    f"Unexpected response structure from {endpoint}"
-                )
-            return json_res["data"]
-        except (YNABAPIError, requests.exceptions.RequestException):
-            raise
+        if (
+            not isinstance(json_res, dict)
+            or "data" not in json_res
+            or not isinstance(json_res["data"], dict)
+        ):
+            raise YNABResponseError(f"Unexpected response structure from {endpoint}")
+        return json_res["data"]
 
     def update_transaction(
-        self, transaction_id: str, payload: Mapping[str, object]
+        self,
+        transaction_id: str,
+        payload: Mapping[str, object],
     ) -> bool:
         """Update a YNAB transaction.
 
@@ -126,7 +131,8 @@ class YNABClient:
         return True
 
     def _find_internal_master_category_group_id(
-        self, category_groups: list[dict[str, Any]]
+        self,
+        category_groups: list[dict[str, Any]],
     ) -> str | None:
         """Find the Internal Master Category group ID to exclude it."""
         for group in category_groups:

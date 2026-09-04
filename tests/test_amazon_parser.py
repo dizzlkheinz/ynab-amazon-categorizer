@@ -189,7 +189,8 @@ View order details Invoice
 def test_cancelled_order_detection_is_case_insensitive() -> None:
     """An all-caps 'ORDER PLACED' / 'Your order was cancelled' header/notice
     must still be recognized and excluded, not just the lowercase 'Order
-    placed' form."""
+    placed' form.
+    """
     order_text = """ORDER PLACED
 June 1, 2026
 TOTAL
@@ -239,7 +240,6 @@ def test_size_variant_items_kept_as_distinct_not_merged() -> None:
 
 def test_quantity_badge_expands_to_one_entry_per_unit() -> None:
     """Trailing quantity badge numbers expand to one item entry per unit bought.
-
 
     BEHAVIOR CHANGE: this used to collapse a "Product Name <qty>" / "Product
     Name" badge pair down to a single item entry (see git history for the

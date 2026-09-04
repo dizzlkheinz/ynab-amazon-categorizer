@@ -43,7 +43,7 @@ def test_sanitize_memo_strips_control_chars() -> None:
     assert "\x00" not in result
     assert "\x07" not in result
     assert "\n" in result
-    assert "HelloWorldTest\nKeep" == result
+    assert result == "HelloWorldTest\nKeep"
 
 
 def test_sanitize_memo_custom_max_length() -> None:

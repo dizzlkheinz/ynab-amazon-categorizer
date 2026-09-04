@@ -8,6 +8,15 @@ from .models import Order
 # YNAB memo field maximum length (API rejects longer values)
 YNAB_MEMO_MAX_LENGTH = 200
 
+# Marker appended when a memo is truncated mid-text.
+_ELLIPSIS = "..."
+
+# Separator between truncated memo text and a preserved order link.
+_LINK_SEPARATOR = "\n..\n"
+
+# Below this many characters, keeping text beside the link is not worth it.
+MIN_MEMO_TEXT_BEFORE_LINK = 10
+
 
 def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
     """Sanitize a memo string for YNAB API submission.
@@ -23,7 +32,7 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
     memo = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f]", "", memo)
     memo = memo.strip()
 
-    if max_length <= 3:
+    if max_length <= len(_ELLIPSIS):
         return memo[:max_length]
 
     if len(memo) <= max_length:
@@ -33,13 +42,13 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
     link_match = re.search(r"(https://www\.\S+)$", memo)
     if link_match:
         link = link_match.group(1)
-        available = max_length - len(link) - 4  # 4 for "\n..\n"
-        if available > 10:
-            return memo[:available].rstrip() + "\n..\n" + link
+        available = max_length - len(link) - len(_LINK_SEPARATOR)
+        if available > MIN_MEMO_TEXT_BEFORE_LINK:
+            return memo[:available].rstrip() + _LINK_SEPARATOR + link
         if len(link) <= max_length:
             return link
     # Simple truncation with ellipsis
-    return memo[: max_length - 3].rstrip() + "..."
+    return memo[: max_length - len(_ELLIPSIS)].rstrip() + _ELLIPSIS
 
 
 def generate_split_summary_memo(order: Order) -> str:
@@ -118,11 +127,11 @@ def _format_item_details(item_details: Any) -> str | None:
 class MemoGenerator:
     """Generates enriched memos with Amazon order details."""
 
-    def __init__(self, amazon_domain: str = "amazon.ca"):
+    def __init__(self, amazon_domain: str = "amazon.ca") -> None:
         self.amazon_domain = amazon_domain
 
     def generate_amazon_order_link(self, order_id: str | None) -> str | None:
-        """Generate Amazon order link from order ID"""
+        """Generate an Amazon order link from an order ID."""
         if order_id:
             return f"https://www.{self.amazon_domain}/gp/your-account/order-details?ie=UTF8&orderID={order_id}"
         return None
@@ -133,7 +142,7 @@ class MemoGenerator:
         order_id: str | None,
         item_details: Any | None = None,
     ) -> str:
-        """Generate enhanced memo with order information and item details"""
+        """Generate an enhanced memo with order information and item details."""
         memo_parts = []
         if original_memo:
             memo_parts.append(original_memo)

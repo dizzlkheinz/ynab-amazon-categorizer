@@ -64,41 +64,53 @@ class TransactionUpdate(TypedDict, total=False):
     subtransactions: list[SaveSubtransaction]
 
 
-def validate_ynab_transaction(value: object) -> YNABTransaction:
-    """Validate the YNAB fields required by filtering and processing."""
-    if not isinstance(value, dict):
-        raise ValueError("expected an object")
-    raw = cast(dict[str, object], value)
+_REQUIRED_STRINGS = ("id", "account_id", "date")
 
-    for field_name in ("id", "account_id", "date"):
+_NULLABLE_STRINGS = (
+    "payee_id",
+    "payee_name",
+    "category_id",
+    "memo",
+    "cleared",
+    "flag_color",
+    "import_id",
+    "transfer_account_id",
+)
+
+
+def _require_non_empty_strings(raw: dict[str, object]) -> None:
+    """Require the identity fields YNAB always sends to be present and non-empty."""
+    for field_name in _REQUIRED_STRINGS:
         field_value = raw.get(field_name)
         if not isinstance(field_value, str) or not field_value:
             raise ValueError(f"{field_name} must be a non-empty string")
 
-    try:
-        date.fromisoformat(cast(str, raw["date"]))
-    except ValueError as exc:
-        raise ValueError("date must use ISO YYYY-MM-DD format") from exc
 
-    amount = raw.get("amount")
-    if not isinstance(amount, int) or isinstance(amount, bool):
-        raise ValueError("amount must be an integer number of milliunits")
-
-    nullable_strings = (
-        "payee_id",
-        "payee_name",
-        "category_id",
-        "memo",
-        "cleared",
-        "flag_color",
-        "import_id",
-        "transfer_account_id",
-    )
-    for field_name in nullable_strings:
+def _require_nullable_strings(raw: dict[str, object]) -> None:
+    """Require the optional string fields to be strings when YNAB sends them."""
+    for field_name in _NULLABLE_STRINGS:
         field_value = raw.get(field_name)
         if field_value is not None and not isinstance(field_value, str):
             raise ValueError(f"{field_name} must be a string or null")
 
+
+def _require_iso_date(raw: dict[str, object]) -> None:
+    """Require ``date`` to be a parseable ISO calendar date."""
+    try:
+        date.fromisoformat(cast("str", raw["date"]))
+    except ValueError as exc:
+        raise ValueError("date must use ISO YYYY-MM-DD format") from exc
+
+
+def _require_amount(raw: dict[str, object]) -> None:
+    """Require ``amount`` to be milliunits, rejecting the bool subclass of int."""
+    amount = raw.get("amount")
+    if not isinstance(amount, int) or isinstance(amount, bool):
+        raise ValueError("amount must be an integer number of milliunits")
+
+
+def _require_optional_fields(raw: dict[str, object]) -> None:
+    """Require ``approved`` and ``subtransactions`` to match their YNAB types."""
     approved = raw.get("approved")
     if approved is not None and not isinstance(approved, bool):
         raise ValueError("approved must be a boolean")
@@ -107,4 +119,17 @@ def validate_ynab_transaction(value: object) -> YNABTransaction:
     if subtransactions is not None and not isinstance(subtransactions, list):
         raise ValueError("subtransactions must be a list")
 
-    return cast(YNABTransaction, raw)
+
+def validate_ynab_transaction(value: object) -> YNABTransaction:
+    """Validate the YNAB fields required by filtering and processing."""
+    if not isinstance(value, dict):
+        raise ValueError("expected an object")
+    raw = cast("dict[str, object]", value)
+
+    _require_non_empty_strings(raw)
+    _require_iso_date(raw)
+    _require_amount(raw)
+    _require_nullable_strings(raw)
+    _require_optional_fields(raw)
+
+    return cast("YNABTransaction", raw)

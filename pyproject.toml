@@ -35,7 +35,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.0",
-    "ty==0.0.14",
+    "ty==0.0.78",
     "tach>=0.35.0",
     "pre-commit>=4.5.1",
 ]
@@ -94,20 +94,71 @@ line-length = 88
 extend-exclude = ["src/ynab_amazon_categorizer/_version.py"]
 
 [tool.ruff.lint]
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-]
+select = ["ALL"]
 ignore = [
-    "E501",  # line too long, handled by formatter
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
+    "ARG005",   # unused args in monkeypatch lambda stubs
+    "COM812",   # trailing comma; conflicts with ruff format
+    "CPY001",   # copyright notice
+    "E501",     # line too long; handled by the formatter
+    "PLR2004",  # magic values are the point of a test fixture
+    "PT009",
+    "PT027",
+    "S101",     # assert is how pytest works
+    "T201",     # print: this is an interactive CLI
+
+    # Exception style: the message text IS the user-facing error copy, so
+    # hoisting it into a variable before `raise` only adds indirection.
+    "EM101",
+    "EM102",
+    "TRY003",
+
+    # dry_run / include_reconciled are positional bools throughout; making
+    # them keyword-only is an API break across every call site for no gain.
+    "FBT001",
+    "FBT002",
+    "FBT003",
+
+    # CLI orchestration helpers take many collaborators deliberately: this
+    # codebase passes dependencies explicitly rather than reaching for globals.
+    "PLR0913",
+    "PLR0917",
+
+    # logger.exception would append tracebacks to an interactive CLI that
+    # already prints a clean "Could not fetch X: {exc}" beside the log line.
+    "TRY400",
+
+    # validate_ynab_transaction raises ValueError by contract; its caller in
+    # transactions.py catches ValueError to add the field path, and a
+    # TypeError would escape that handler.
+    "TRY004",
+
+    # Amazon order dates are naive local dates with no zone information.
+    "DTZ007",
+
+    # __init__ docstrings: the class docstring carries the contract.
+    "D107",
+
+    # Test docstrings are single explanatory sentences wrapped over several
+    # lines; forcing a one-line summary means rewriting the author's prose,
+    # not reformatting it. All src/ docstrings already satisfy D205.
+    "D205",
+
+    # D212/D213 and D203/D211 are mutually exclusive pairs; ruff drops one of
+    # each with a warning unless it is named here. This repo puts the summary
+    # on the first line after the opening quotes (D212) and uses no blank line
+    # before a class docstring (D211), so the other half of each pair goes.
+    "D213",
+    "D203",
+
+    # memo item_details is genuinely str-or-dict; `object` breaks ty's
+    # narrowing back to dict[str, Any] (verified this session).
+    "ANN401",
 ]
+
+[tool.ruff.lint.pylint]
+# A parser built from guard clauses reads better as a flat chain of early
+# returns than as nested conditionals; 8 accommodates _get_valid_cleaned_item.
+max-returns = 8
 
 [tool.typos.default]
 extend-words = { "unparseable" = "unparseable" }

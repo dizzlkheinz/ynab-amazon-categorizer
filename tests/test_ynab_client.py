@@ -1,11 +1,11 @@
 """Tests for YNAB API client functionality."""
 
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from ynab_amazon_categorizer.exceptions import (
     YNABAPIError,
@@ -16,6 +16,9 @@ from ynab_amazon_categorizer.exceptions import (
     YNABValidationError,
 )
 from ynab_amazon_categorizer.ynab_client import YNABClient
+
+if TYPE_CHECKING:
+    from urllib3.util.retry import Retry
 
 
 def test_ynab_client_has_retry_adapter() -> None:

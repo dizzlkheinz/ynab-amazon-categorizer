@@ -287,8 +287,10 @@ Right To Your Door
 
     assert len(orders) == 1
     assert orders[0].items == [
-        "SANDISK 128GB MAX Endurance microSDXC Card with Adapter for Home "
-        "Security Cameras and Dash cams"
+        (
+            "SANDISK 128GB MAX Endurance microSDXC Card with Adapter for Home "
+            "Security Cameras and Dash cams"
+        )
     ]
 
 

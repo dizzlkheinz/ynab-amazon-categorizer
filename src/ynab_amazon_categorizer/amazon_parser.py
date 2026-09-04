@@ -55,9 +55,15 @@ ORDER_TAIL_SENTINEL_PATTERN = re.compile(
 # title (e.g. a model number) than a genuine "you bought N of these" badge.
 MAX_REASONABLE_BADGE_QTY = 12
 
+# Lines shorter than this are navigation chrome, not product names.
+MIN_ITEM_LENGTH = 15
+
+# A line this many words long is descriptive enough to be a product name.
+MIN_DESCRIPTIVE_WORDS = 5
+
 
 def _normalize_markdown_text(text: str) -> str:
-    """Strip markdown-link and bullet-marker syntax from a full page of text.
+    r"""Strip markdown-link and bullet-marker syntax from a full page of text.
 
     Some order-history copies (e.g. from a markdown-rendering copy tool)
     wrap every line as "* [Visible Text](https://...)". Left as-is, this
@@ -70,8 +76,7 @@ def _normalize_markdown_text(text: str) -> str:
     header, cancelled-order detection, and item extraction — sees plain text.
     """
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1 ", text)  # [text](url) -> text
-    text = re.sub(r"(?m)^[ \t]*[-•*]\s*", "", text)  # leading bullet markers
-    return text
+    return re.sub(r"(?m)^[ \t]*[-•*]\s*", "", text)  # leading bullet markers
 
 
 # Amazon sometimes emits an image's alt-text line and the product-link text
@@ -101,7 +106,7 @@ def _item_token_set(text: str) -> set[str]:
 
 
 def _differs_only_numerically(a: str, b: str) -> bool:
-    """True if the only tokens that differ between two lines are pure numbers.
+    """Return whether the only differing tokens between two lines are numbers.
 
     e.g. "...Bourbon, 38" vs. "...Bourbon, 36" — that's the "same listing,
     different size/quantity/model number" case, a real separate line item,
@@ -114,7 +119,7 @@ def _differs_only_numerically(a: str, b: str) -> bool:
 
 
 def _differs_by_single_word_substitution(a: str, b: str) -> bool:
-    """True if the two lines differ by exactly one token swapped for another.
+    """Return whether the two lines differ by exactly one swapped token.
 
     e.g. "...24 oz, Black" vs. "...24 oz, White" — a color/size *word* variant
     of the same listing, i.e. a real separate line item, the word analogue of
@@ -142,9 +147,12 @@ def _token_overlap(a: str, b: str) -> float:
 
 
 def _is_duplicate_item_pair(
-    prev_item: str, prev_had_leading_space: bool, item: str, had_leading_space: bool
+    prev_item: str,
+    prev_had_leading_space: bool,
+    item: str,
+    had_leading_space: bool,
 ) -> bool:
-    """True if `item` is a reworded repeat of the immediately preceding kept item.
+    """Return whether `item` is a reworded repeat of the preceding kept item.
 
     Prefers the structural signal (leading-space alt-text line immediately
     followed by a non-indented title line) when present, since it reliably
@@ -264,11 +272,16 @@ class AmazonParser:
         return orders
 
     def _find_order_content_end(
-        self, orders_text: str, start_pos: int, default_end: int
+        self,
+        orders_text: str,
+        start_pos: int,
+        default_end: int,
     ) -> int:
         """Find the earliest unparsed order-like boundary before the default end."""
         boundary = ORDER_CONTENT_BOUNDARY_PATTERN.search(
-            orders_text, start_pos, default_end
+            orders_text,
+            start_pos,
+            default_end,
         )
         if boundary:
             return boundary.start()
@@ -299,7 +312,7 @@ class AmazonParser:
     def _get_valid_cleaned_item(self, line: str) -> str | None:
         """Check if a line matches product name criteria and return the cleaned string, or None."""
         line = line.strip()
-        if not line or len(line) < 15:
+        if not line or len(line) < MIN_ITEM_LENGTH:
             return None
 
         # Normalize markdown link formatting before any other checks. Some
@@ -312,19 +325,25 @@ class AmazonParser:
         line = re.sub(r"^[-•*]\s*", "", line)  # leading bullet marker
         line = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1 ", line)  # [text](url) -> text
         line = re.sub(r"\s+", " ", line).strip()
-        if not line or len(line) < 15:
+        if not line or len(line) < MIN_ITEM_LENGTH:
             return None
 
         # Skip common UI elements and delivery status lines
         skip_patterns = [
             r"^(Buy it again|Track package|View|Return|Write|Get|Share|Leave|Ask)\b",
             r"^(Delivered|Arriving|Now arriving|Auto-delivered|Package was)",
-            r"^(Your package|Your order|Your item|Your shipment|Your refund"
-            r"|Your replacement)\b",
-            r"^(Return items:|Return or replace|Refund issued|Refund:|Returned"
-            r"|Return started)",
-            r"^(Subscribe & Save|Subscribe now|Skip this delivery|Deliver every"
-            r"|Change delivery|Manage subscription|Edit delivery|Set up now)",
+            (
+                r"^(Your package|Your order|Your item|Your shipment|Your refund"
+                r"|Your replacement)\b"
+            ),
+            (
+                r"^(Return items:|Return or replace|Refund issued|Refund:|Returned"
+                r"|Return started)"
+            ),
+            (
+                r"^(Subscribe & Save|Subscribe now|Skip this delivery|Deliver every"
+                r"|Change delivery|Manage subscription|Edit delivery|Set up now)"
+            ),
             r"^\d+\.?\d* out of \d+ stars",
             r"^FREE|^Today by|^Get it|^List:|^Was:|^Limited-time deal",
             r"^\$\d+\.\d+|\(\$\d+\.\d+",
@@ -360,9 +379,10 @@ class AmazonParser:
                 ]
             )
             or re.search(
-                r"[A-Z][a-z].*[A-Z]", line
+                r"[A-Z][a-z].*[A-Z]",
+                line,
             )  # Mixed case indicating product names
-            or len(line.split()) >= 5
+            or len(line.split()) >= MIN_DESCRIPTIVE_WORDS
         )  # Long descriptive lines
 
         if not has_product_pattern:
@@ -400,7 +420,8 @@ class AmazonParser:
         return cleaned_line
 
     def _deduplicate_and_badge_filter(
-        self, candidates: list[tuple[str, bool]]
+        self,
+        candidates: list[tuple[str, bool]],
     ) -> list[str]:
         """Resolve quantity-badge duplicates and drop (near-)duplicate lines.
 
@@ -423,7 +444,7 @@ class AmazonParser:
         for item, had_leading_space in candidates:
             normalized, qty = _resolve_badge_item(item, candidate_texts)
 
-            if normalized in seen or len(normalized) <= 15:
+            if normalized in seen or len(normalized) <= MIN_ITEM_LENGTH:
                 continue
             # Skip a reworded/reordered repeat of the item we *just* kept
             # (e.g. an image alt-text line immediately followed by the
