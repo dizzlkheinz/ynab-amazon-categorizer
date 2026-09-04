@@ -1,10 +1,13 @@
 """Interactive CLI: match Amazon orders to YNAB transactions and categorize."""
 
 import argparse
+import contextlib
 import copy
+import io
 import json
 import logging
 import os
+import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -1259,8 +1262,17 @@ def _run(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _ensure_utf8_streams() -> None:
+    """Ensure standard output and error streams handle Unicode safely."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI with clean handling for terminal cancellation."""
+    _ensure_utf8_streams()
     try:
         return _run(argv)
     except (EOFError, KeyboardInterrupt):

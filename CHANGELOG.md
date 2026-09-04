@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-09-04
+
+### Fixed
+
+- Safely reconfigure standard output and error streams to UTF-8 on Windows consoles to prevent `UnicodeEncodeError` when running via `uvx` / `pipx`
+- Add `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` to release workflow to prevent Node.js 20 runner deprecation warnings
+
 ## [2.5.0] - 2026-09-04
 
 ### Changed
