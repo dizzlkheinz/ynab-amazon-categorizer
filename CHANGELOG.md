@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-04
+
+### Changed
+
+- Adopt Ruff `select = ["ALL"]` ruleset and resolve all lint and formatting violations across the codebase
+- Upgrade dependencies: Ruff 0.16.6, pytest 9.1.1, ty 0.0.78, requests 2.34.2, and prompt-toolkit 3.0.53
+- Move CI to local pre-commit hooks and enforce architecture boundaries with Tach
+- Add VibeDrift code hygiene and drift enforcement checks
+- Reduce cognitive complexity across matcher, parser, memo generator, batch, and CLI orchestration
+
 ## [2.4.2] - 2026-07-10
 
 ### Added
