@@ -89,14 +89,40 @@ def build_batch_memo(
     return None
 
 
-class MemoGenerator:
-    """Handles memo generation for Amazon transactions."""
+def _format_item_details_dict(item_details: dict[str, Any]) -> str:
+    """Format title, quantity, and price from an item details dictionary."""
+    title = item_details.get("title")
+    quantity = item_details.get("quantity")
+    price = item_details.get("price")
 
-    def __init__(self, amazon_domain: str = "amazon.ca") -> None:
+    details_str = ""
+    if title:
+        details_str += str(title)
+    if quantity and int(quantity) > 1:
+        details_str += f" (x{quantity})"
+    if price:
+        details_str += f" - ${float(price):.2f}"
+    return details_str
+
+
+def _format_item_details(item_details: Any) -> str | None:
+    """Extract and format item details from string or dict representation."""
+    if isinstance(item_details, dict):
+        formatted = _format_item_details_dict(item_details)
+        return formatted or None
+    if isinstance(item_details, str):
+        return item_details
+    return None
+
+
+class MemoGenerator:
+    """Generates enriched memos with Amazon order details."""
+
+    def __init__(self, amazon_domain: str = "amazon.ca"):
         self.amazon_domain = amazon_domain
 
     def generate_amazon_order_link(self, order_id: str | None) -> str | None:
-        """Generate Amazon order details link"""
+        """Generate Amazon order link from order ID"""
         if order_id:
             return f"https://www.{self.amazon_domain}/gp/your-account/order-details?ie=UTF8&orderID={order_id}"
         return None
@@ -112,24 +138,9 @@ class MemoGenerator:
         if original_memo:
             memo_parts.append(original_memo)
 
-        if item_details:
-            if isinstance(item_details, dict):
-                title = item_details.get("title")
-                quantity = item_details.get("quantity")
-                price = item_details.get("price")
-
-                details_str = ""
-                if title:
-                    details_str += str(title)
-                if quantity and int(quantity) > 1:
-                    details_str += f" (x{quantity})"
-                if price:
-                    details_str += f" - ${float(price):.2f}"
-
-                if details_str:
-                    memo_parts.append(details_str)
-            elif isinstance(item_details, str):
-                memo_parts.append(item_details)
+        details_str = _format_item_details(item_details)
+        if details_str:
+            memo_parts.append(details_str)
 
         order_link = self.generate_amazon_order_link(order_id)
         if order_link:

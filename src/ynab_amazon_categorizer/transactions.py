@@ -18,7 +18,7 @@ AMAZON_PAYEE_PATTERN = re.compile(
 
 def is_amazon_payee(payee_name: str) -> bool:
     """Return whether a payee contains a standalone Amazon merchant marker."""
-    return AMAZON_PAYEE_PATTERN.search(payee_name) is not None
+    return bool(AMAZON_PAYEE_PATTERN.search(payee_name))
 
 
 def fetch_amazon_transactions(

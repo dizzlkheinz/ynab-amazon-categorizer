@@ -24,6 +24,75 @@ def _parse_order_date(date_str: str | None) -> datetime | None:
         return None
 
 
+def _calculate_proximity_score(
+    trans_date: datetime | None, order_date_str: str | None, max_date_diff_days: int
+) -> tuple[int, int | None] | None:
+    """Calculate date proximity score and date diff, or None if outside window."""
+    score = 100
+    date_diff: int | None = None
+    if trans_date:
+        order_date = _parse_order_date(order_date_str)
+        if order_date:
+            date_diff = abs((trans_date - order_date).days)
+            if date_diff > max_date_diff_days:
+                return None
+            if date_diff <= 1:  # Same or next day
+                score += 30
+            elif date_diff <= 3:  # Within 3 days
+                score += 15
+            elif date_diff <= 7:  # Within a week
+                score += 5
+    return score, date_diff
+
+
+def _is_better_candidate(
+    score: int,
+    date_diff: int | None,
+    order_id: str,
+    best_score: int,
+    best_date_diff: int | None,
+    best_order_id: str,
+) -> bool:
+    """Deterministic tie-breaking: score > date_diff (lower wins) > order_id."""
+    if score > best_score:
+        return True
+    if score == best_score:
+        if date_diff is not None and (
+            best_date_diff is None or date_diff < best_date_diff
+        ):
+            return True
+        if date_diff == best_date_diff and order_id < best_order_id:
+            return True
+    return False
+
+
+def _is_amount_candidate(
+    order: Order, amount_abs: float, used_order_ids: set[str] | None
+) -> bool:
+    """Check if an order matches the transaction amount and has not been used."""
+    if order.total is None:
+        return False
+    if (
+        used_order_ids
+        and order.order_id is not None
+        and order.order_id in used_order_ids
+    ):
+        return False
+    return abs(order.total - amount_abs) < 0.01
+
+
+def _is_within_date_window(
+    trans_date: datetime | None, order_date_str: str | None, max_date_diff_days: int
+) -> bool:
+    """Return whether order date is within max_date_diff_days when dates are parseable."""
+    if not trans_date:
+        return True
+    order_date = _parse_order_date(order_date_str)
+    if not order_date:
+        return True
+    return abs((trans_date - order_date).days) <= max_date_diff_days
+
+
 class TransactionMatcher:
     """Matches Amazon orders with YNAB transactions."""
 
@@ -59,55 +128,20 @@ class TransactionMatcher:
         best_order_id: str = ""
 
         for order in parsed_orders:
-            if order.total is None:
+            if not _is_amount_candidate(order, transaction_amount_abs, used_order_ids):
                 continue
 
-            if (
-                used_order_ids
-                and order.order_id is not None
-                and order.order_id in used_order_ids
-            ):
+            match_result = _calculate_proximity_score(
+                trans_date, order.date_str, max_date_diff_days
+            )
+            if match_result is None:
                 continue
-
-            amount_diff = abs(order.total - transaction_amount_abs)
-            if amount_diff >= 0.01:
-                continue
-
-            score = 100
-            date_diff: int | None = None
-
-            # Check date proximity
-            if trans_date:
-                order_date = _parse_order_date(order.date_str)
-                if order_date:
-                    date_diff = abs((trans_date - order_date).days)
-                    if date_diff > max_date_diff_days:
-                        continue
-                    if date_diff <= 1:  # Same or next day
-                        score += 30
-                    elif date_diff <= 3:  # Within 3 days
-                        score += 15
-                    elif date_diff <= 7:  # Within a week
-                        score += 5
-
+            score, date_diff = match_result
             order_id = order.order_id or ""
 
-            # Deterministic tie-breaking: score > date_diff (lower wins) > order_id
-            is_better = False
-            if score > best_score:
-                is_better = True
-            elif score == best_score:
-                # Tie on score: prefer closer date
-                if date_diff is not None and (
-                    best_date_diff is None or date_diff < best_date_diff
-                ):
-                    is_better = True
-                elif date_diff == best_date_diff:
-                    # Tie on date too: use order_id as stable key
-                    if order_id < best_order_id:
-                        is_better = True
-
-            if is_better:
+            if _is_better_candidate(
+                score, date_diff, order_id, best_score, best_date_diff, best_order_id
+            ):
                 best_score = score
                 best_match = order
                 best_date_diff = date_diff
@@ -134,27 +168,16 @@ class TransactionMatcher:
         amount_abs = abs(transaction_amount)
         trans_date = _parse_transaction_date(transaction_date)
 
-        candidates: list[Order] = []
-        for order in parsed_orders:
-            if order.total is None:
-                continue
-            if (
-                used_order_ids
-                and order.order_id is not None
-                and order.order_id in used_order_ids
-            ):
-                continue
-            if abs(order.total - amount_abs) >= 0.01:
-                continue
-            candidates.append(order)
+        candidates = [
+            order
+            for order in parsed_orders
+            if _is_amount_candidate(order, amount_abs, used_order_ids)
+        ]
 
         if len(candidates) != 1:
             return None
 
         order = candidates[0]
-        if trans_date:
-            order_date = _parse_order_date(order.date_str)
-            if order_date:
-                if abs((trans_date - order_date).days) > max_date_diff_days:
-                    return None
+        if not _is_within_date_window(trans_date, order.date_str, max_date_diff_days):
+            return None
         return order

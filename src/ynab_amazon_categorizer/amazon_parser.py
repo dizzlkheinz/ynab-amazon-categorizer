@@ -164,6 +164,19 @@ def _is_duplicate_item_pair(
     return _token_overlap(prev_item, item) >= NEAR_DUPLICATE_JACCARD_THRESHOLD
 
 
+def _resolve_badge_item(item: str, candidate_texts: set[str]) -> tuple[str, int]:
+    """Resolve quantity-badge suffix if present, returning (normalized_text, qty)."""
+    badge_match = re.search(r"\s+(\d+)$", item)
+    if badge_match:
+        stripped = item[: badge_match.start()]
+        if stripped != item and stripped in candidate_texts:
+            qty = int(badge_match.group(1))
+            if qty < 1 or qty > MAX_REASONABLE_BADGE_QTY:
+                qty = 1
+            return stripped, qty
+    return item, 1
+
+
 class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
@@ -408,12 +421,7 @@ class AmazonParser:
         last_kept_had_leading_space = False
 
         for item, had_leading_space in candidates:
-            badge_match = re.search(r"\s+(\d+)$", item)
-            stripped = item[: badge_match.start()] if badge_match else item
-            is_badge = bool(
-                badge_match and stripped != item and stripped in candidate_texts
-            )
-            normalized = stripped if is_badge else item
+            normalized, qty = _resolve_badge_item(item, candidate_texts)
 
             if normalized in seen or len(normalized) <= 15:
                 continue
@@ -430,9 +438,6 @@ class AmazonParser:
                 continue
 
             seen.add(normalized)
-            qty = int(badge_match.group(1)) if is_badge and badge_match else 1
-            if qty < 1 or qty > MAX_REASONABLE_BADGE_QTY:
-                qty = 1
             for _ in range(qty):
                 if len(unique_items) >= MAX_ITEMS_PER_ORDER:
                     break

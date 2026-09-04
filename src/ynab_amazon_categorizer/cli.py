@@ -267,6 +267,27 @@ class CategoryCompleter(Completer):
                     )
 
 
+def _lookup_category(
+    user_input: str,
+    name_to_id_map: dict[str, str],
+    category_completer: CategoryCompleter,
+) -> tuple[str, str] | None:
+    """Find (category_id, display_name) for user input if recognized."""
+    input_lower = user_input.lower()
+    if input_lower not in name_to_id_map:
+        return None
+    selected_id = name_to_id_map[input_lower]
+    selected_display_name = next(
+        (
+            name
+            for name, cat_id in category_completer.category_list
+            if cat_id == selected_id
+        ),
+        "",
+    )
+    return selected_id, selected_display_name
+
+
 def prompt_for_category_selection(
     category_completer: CategoryCompleter, name_to_id_map: dict[str, str]
 ) -> tuple[str | None, str | None]:
@@ -294,20 +315,16 @@ def prompt_for_category_selection(
             empty_streak = 0
             if user_input.lower() == "b":
                 return None, None
-            input_lower = user_input.lower()
-            if input_lower in name_to_id_map:
-                selected_id = name_to_id_map[input_lower]
-                selected_display_name = ""
-                for name, cat_id in category_completer.category_list:
-                    if cat_id == selected_id:
-                        selected_display_name = name
-                        break
+
+            match = _lookup_category(user_input, name_to_id_map, category_completer)
+            if match:
+                selected_id, selected_display_name = match
                 print(f"Selected: {selected_display_name}")
                 return selected_id, selected_display_name
-            else:
-                print(
-                    f"Error: '{user_input}' is not a recognized category. Please use Tab completion or try again."
-                )
+
+            print(
+                f"Error: '{user_input}' is not a recognized category. Please use Tab completion or try again."
+            )
         except EOFError:
             print("\nOperation cancelled by user (EOF).")
             return None, None
@@ -417,6 +434,52 @@ def resolve_memo(
     return _prompt_memo_confirmation(enhanced_memo, original_memo)
 
 
+def _prompt_split_amount_milliunits(
+    category_name: str | None, remaining_milliunits: int
+) -> int:
+    """Prompt the user for a split amount and return the signed milliunits value."""
+    tax_rate = _tax_rate_for_category(category_name)
+    tax_pct = tax_rate * 100
+    while True:
+        try:
+            max_amount = abs(remaining_milliunits / 1000.0)
+            max_base = max_amount / (1 + tax_rate) if tax_rate else max_amount
+            base_str = _prompt_line(
+                f"Enter base price for '{category_name}' ({tax_pct:g}% tax, "
+                f"max base ~{max_base:.2f}, blank = remaining {max_amount:.2f} as-is): "
+            ).strip()
+
+            if not base_str:
+                split_amount_float = max_amount
+            elif base_str.startswith("="):
+                split_amount_float = float(
+                    base_str[1:].replace("$", "").replace(",", "")
+                )
+                if split_amount_float <= 0:
+                    print("Amount must be positive.")
+                    continue
+            else:
+                base_amount = float(base_str.replace("$", "").replace(",", ""))
+                if base_amount <= 0:
+                    print("Amount must be positive.")
+                    continue
+                tax_amount = round(base_amount * tax_rate, 2)
+                split_amount_float = round(base_amount + tax_amount, 2)
+                print(
+                    f"  Base: ${base_amount:.2f}  +  Tax ({tax_pct:g}%): "
+                    f"${tax_amount:.2f}  =  Total: ${split_amount_float:.2f}"
+                )
+
+            split_amount_milliunits = compute_split_amount(
+                split_amount_float, remaining_milliunits
+            )
+            if split_amount_milliunits == remaining_milliunits:
+                print("Amount covers remaining balance.")
+            return split_amount_milliunits
+        except ValueError as e:
+            print(str(e) if str(e) != str(e).lower() else "Invalid amount.")
+
+
 def handle_split(
     transaction: Mapping[str, Any],
     matching_order: Order | None,
@@ -461,46 +524,9 @@ def handle_split(
         # via _tax_rate_for_category). Blank uses the full remaining balance
         # as-is (e.g. for a final catch-all split); '=' prefix enters an
         # exact charged total with no tax math applied.
-        tax_rate = _tax_rate_for_category(category_name)
-        tax_pct = tax_rate * 100
-        while True:
-            try:
-                max_amount = abs(remaining_milliunits / 1000.0)
-                max_base = max_amount / (1 + tax_rate) if tax_rate else max_amount
-                base_str = _prompt_line(
-                    f"Enter base price for '{category_name}' ({tax_pct:g}% tax, "
-                    f"max base ~{max_base:.2f}, blank = remaining {max_amount:.2f} as-is): "
-                ).strip()
-
-                if not base_str:
-                    split_amount_float = max_amount
-                elif base_str.startswith("="):
-                    split_amount_float = float(
-                        base_str[1:].replace("$", "").replace(",", "")
-                    )
-                    if split_amount_float <= 0:
-                        print("Amount must be positive.")
-                        continue
-                else:
-                    base_amount = float(base_str.replace("$", "").replace(",", ""))
-                    if base_amount <= 0:
-                        print("Amount must be positive.")
-                        continue
-                    tax_amount = round(base_amount * tax_rate, 2)
-                    split_amount_float = round(base_amount + tax_amount, 2)
-                    print(
-                        f"  Base: ${base_amount:.2f}  +  Tax ({tax_pct:g}%): "
-                        f"${tax_amount:.2f}  =  Total: ${split_amount_float:.2f}"
-                    )
-
-                split_amount_milliunits = compute_split_amount(
-                    split_amount_float, remaining_milliunits
-                )
-                if split_amount_milliunits == remaining_milliunits:
-                    print("Amount covers remaining balance.")
-                break  # Amount valid
-            except ValueError as e:
-                print(str(e) if str(e) != str(e).lower() else "Invalid amount.")
+        split_amount_milliunits = _prompt_split_amount_milliunits(
+            category_name, remaining_milliunits
+        )
 
         # --- ENHANCED SPLIT MEMO INPUT ---
         split_memo = _resolve_split_memo(
@@ -590,6 +616,51 @@ def _resolve_split_memo(
     return _prompt_split_memo_confirmation(suggested_split_memo, category_name)
 
 
+def _should_skip_inflow(
+    payee: str, amount_float: float, matching_order: Order | None
+) -> bool:
+    """Prompt whether to process an inflow transaction; returns True to skip."""
+    currency = matching_order.currency if matching_order else None
+    print(
+        f"Found inflow transaction: {payee} "
+        f"{format_currency_amount(amount_float, currency)}"
+    )
+    process_inflow = _prompt_line(
+        "Process this inflow (refund/credit)? (y/n, default n): "
+    ).lower()
+    if process_inflow != "y":
+        print("Skipping inflow transaction.")
+        return True
+    return False
+
+
+def _print_transaction_summary(
+    transaction: Mapping[str, Any],
+    index: int,
+    total: int,
+    amount_float: float,
+    matching_order: Order | None,
+) -> None:
+    """Print standard transaction details header."""
+    print(f"\n--- Processing Transaction {index + 1}/{total} ---")
+    print(f"  ID:   {transaction['id']}")
+    print(f"  Date: {transaction['date']}")
+    print(f"  Payee: {transaction.get('payee_name', 'N/A')}")
+    amount_display = (
+        format_currency_amount(amount_float, matching_order.currency)
+        if matching_order
+        else f"{amount_float:.2f}"
+    )
+    print(f"  Amount: {amount_display}")
+    if transaction.get("cleared") == "reconciled":
+        print(
+            "  Status: 🔒 reconciled (category edits do not affect the reconciled balance)"
+        )
+    original_memo = transaction.get("memo", "")
+    if original_memo:
+        print(f"  Original Memo: {original_memo}")
+
+
 def process_transaction(
     transaction: Mapping[str, Any],
     index: int,
@@ -615,7 +686,6 @@ def process_transaction(
     is used to accumulate run-level counters (currently just
     ``auto_skipped_no_match``) for a summary printed at the end of the run.
     """
-    transaction_id = transaction["id"]
     date = transaction["date"]
     payee = transaction.get("payee_name", "N/A")
     amount_milliunits = transaction["amount"]
@@ -629,35 +699,12 @@ def process_transaction(
             amount_float, date, parsed_orders, used_order_ids
         )
 
-    if amount_milliunits > 0:
-        currency = matching_order.currency if matching_order else None
-        print(
-            f"Found inflow transaction: {payee} "
-            f"{format_currency_amount(amount_float, currency)}"
-        )
-        process_inflow = _prompt_line(
-            "Process this inflow (refund/credit)? (y/n, default n): "
-        ).lower()
-        if process_inflow != "y":
-            print("Skipping inflow transaction.")
-            return True
+    if amount_milliunits > 0 and _should_skip_inflow(
+        payee, amount_float, matching_order
+    ):
+        return True
 
-    print(f"\n--- Processing Transaction {index + 1}/{total} ---")
-    print(f"  ID:   {transaction_id}")
-    print(f"  Date: {date}")
-    print(f"  Payee: {payee}")
-    amount_display = (
-        format_currency_amount(amount_float, matching_order.currency)
-        if matching_order
-        else f"{amount_float:.2f}"
-    )
-    print(f"  Amount: {amount_display}")
-    if transaction.get("cleared") == "reconciled":
-        print(
-            "  Status: 🔒 reconciled (category edits do not affect the reconciled balance)"
-        )
-    if original_memo:
-        print(f"  Original Memo: {original_memo}")
+    _print_transaction_summary(transaction, index, total, amount_float, matching_order)
 
     # Try to find matching order from parsed data and show it
     if parsed_orders:
@@ -722,6 +769,51 @@ def process_transaction(
             print("Invalid action. Choose 'c', 's', or 'q'.")
 
 
+def _should_ask_split(matching_order: Order | None) -> str:
+    """Determine whether to split and prompt the user if appropriate."""
+    if matching_order and matching_order.items and len(matching_order.items) > 1:
+        print("There is more than one item in this transaction.")
+        return _prompt_line("Split this transaction? (y/n, default n): ").lower()
+    if _env_flag("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM"):
+        return "n"
+    return _prompt_line("Split this transaction? (y/n, default n): ").lower()
+
+
+def _confirm_and_apply_update(
+    transaction_id: str,
+    payload: TransactionUpdate,
+    category_id_map: dict[str, str],
+    ynab_client: YNABClient,
+    dry_run: bool,
+) -> str:
+    """Preview update and prompt for confirmation before sending to YNAB."""
+    print("\n--- Preview Update ---")
+    preview_dict = build_preview(payload, category_id_map)
+    print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
+    if dry_run:
+        print("[dry-run] No changes were sent to YNAB.")
+        return "done"
+    confirm = _prompt_line("Confirm update? (y/n, default y): ").lower()
+    if not confirm:
+        confirm = "y"
+    if confirm == "y":
+        try:
+            ynab_client.update_transaction(transaction_id, payload)
+            print("Update successful.")
+            return "done"
+        except (
+            YNABAPIError,
+            requests.exceptions.RequestException,
+            OSError,
+        ) as exc:
+            logger.error("Failed to update transaction %s: %s", transaction_id, exc)
+            print(f"Update failed: {exc}")
+            return "continue"
+    else:
+        print("Update cancelled.")
+        return "continue"
+
+
 def _handle_categorize(
     transaction: Mapping[str, Any],
     matching_order: Order | None,
@@ -741,26 +833,7 @@ def _handle_categorize(
     When ``dry_run`` is True the preview is shown but no update is sent to YNAB.
     """
     transaction_id = transaction["id"]
-    updated_payload_dict: TransactionUpdate | None = None
-
-    # Check if we should offer splitting
-    should_offer_split = bool(
-        matching_order and matching_order.items and len(matching_order.items) > 1
-    )
-
-    if should_offer_split:
-        print("There is more than one item in this transaction.")
-        split_decision = _prompt_line(
-            "Split this transaction? (y/n, default n): "
-        ).lower()
-    elif _env_flag("YNAB_SKIP_SPLIT_PROMPT_SINGLE_ITEM"):
-        # Only one item (or no matched order) — nothing to split, and the
-        # user has opted via .env to skip asking about it every time.
-        split_decision = "n"
-    else:
-        split_decision = _prompt_line(
-            "Split this transaction? (y/n, default n): "
-        ).lower()
+    split_decision = _should_ask_split(matching_order)
 
     if split_decision != "y":
         # --- SINGLE CATEGORY ---
@@ -772,7 +845,6 @@ def _handle_categorize(
             return "continue"
 
         memo_input = resolve_memo(matching_order, original_memo, memo_generator)
-
         updated_payload_dict = build_single_payload(
             category_id, memo_input if memo_input else original_memo
         )
@@ -785,42 +857,16 @@ def _handle_categorize(
             category_completer,
             category_name_map,
         )
-        if subtransactions:
-            updated_payload_dict = build_split_payload(
-                subtransactions, matching_order, original_memo
-            )
-        else:
+        if not subtransactions:
             print("Splitting cancelled. No changes will be made.")
-
-    # --- Confirmation and API Call ---
-    if updated_payload_dict:
-        print("\n--- Preview Update ---")
-        preview_dict = build_preview(updated_payload_dict, category_id_map)
-        print(json.dumps(preview_dict, indent=2, ensure_ascii=False))
-        if dry_run:
-            print("[dry-run] No changes were sent to YNAB.")
-            return "done"
-        confirm = _prompt_line("Confirm update? (y/n, default y): ").lower()
-        if not confirm:
-            confirm = "y"
-        if confirm == "y":
-            try:
-                ynab_client.update_transaction(transaction_id, updated_payload_dict)
-                print("Update successful.")
-                return "done"
-            except (
-                YNABAPIError,
-                requests.exceptions.RequestException,
-                OSError,
-            ) as exc:
-                logger.error("Failed to update transaction %s: %s", transaction_id, exc)
-                print(f"Update failed: {exc}")
-                return "continue"
-        else:
-            print("Update cancelled.")
             return "continue"
+        updated_payload_dict = build_split_payload(
+            subtransactions, matching_order, original_memo
+        )
 
-    return "continue"
+    return _confirm_and_apply_update(
+        transaction_id, updated_payload_dict, category_id_map, ynab_client, dry_run
+    )
 
 
 # --- Main Script Logic ---

@@ -36,6 +36,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.15.0",
     "ty==0.0.14",
+    "tach>=0.35.0",
     "pre-commit>=4.5.1",
 ]
 
@@ -107,4 +108,13 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
 ]
+
+[tool.typos.default]
+extend-words = { "unparseable" = "unparseable" }
+
+[tool.typos.files]
+extend-exclude = [
+    "graphify-out",
+]
+
 

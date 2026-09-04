@@ -25,9 +25,15 @@ python -X utf8 -m pytest tests/ --cov=src --cov-report=html
 # Type checking
 uv run --extra dev ty check src tests
 
+# Architecture boundary checks
+uv run --extra dev tach check
+
 # Formatting and lint
 uv run --extra dev ruff format src tests
 uv run --extra dev ruff check src tests --fix
+
+# Run pre-commit checks locally
+uv run --extra dev pre-commit run --all-files
 
 # Run the CLI locally
 python -X utf8 -m ynab_amazon_categorizer
@@ -46,11 +52,15 @@ python -X utf8 -m ynab_amazon_categorizer
 - Cover both success and failure paths.
 - Validate parser/matcher edge cases with small targeted tests.
 
-## Quality Bar for PRs
+## Quality Bar for Commits
 
-- Tests pass locally.
-- `ty` diagnostics are understood (and new code does not add avoidable issues).
-- `ruff format` and `ruff check` are clean.
+- Run `uv run --extra dev pre-commit run --all-files` (or commit with pre-commit installed).
+- All stages pass locally:
+  - Formatting & linting (`ruff`, `typos`)
+  - Type checking (`ty`)
+  - Architecture & drift (`tach`, `vibedrift`)
+  - Security (`gitleaks`)
+  - Unit tests with coverage (`pytest`)
 - Any behavior change includes a test update.
 
 ## Troubleshooting

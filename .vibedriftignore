@@ -1,0 +1,4 @@
+graphify-out/**
+build/**
+dist/**
+.venv/**

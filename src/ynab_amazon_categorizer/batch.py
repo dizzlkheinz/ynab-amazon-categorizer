@@ -8,12 +8,59 @@ import requests
 
 from .exceptions import YNABAPIError
 from .memo_generator import MemoGenerator, build_batch_memo
-from .models import Order, format_currency_amount
+from .models import Order, TransactionUpdate, format_currency_amount
 from .payloads import build_memo_only_payload
 from .transaction_matcher import TransactionMatcher
 from .ynab_client import YNABClient
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_batch_memo_candidate(
+    transaction: Mapping[str, Any],
+    order: Order,
+    memo_generator: MemoGenerator,
+) -> str | None:
+    """Return enriched memo if valid and changed, or None if skipped."""
+    original_memo = transaction.get("memo")
+    existing_memo = original_memo if isinstance(original_memo, str) else ""
+    memo = build_batch_memo(order, memo_generator, existing_memo)
+    if memo is None:
+        logger.info(
+            "Skipping transaction %s because enrichment would truncate its memo.",
+            transaction["id"],
+        )
+        return None
+    if memo == existing_memo:
+        logger.info(
+            "Skipping transaction %s because its memo is already enriched.",
+            transaction["id"],
+        )
+        return None
+    return memo
+
+
+def _apply_batch_enrichment(
+    transaction: Mapping[str, Any],
+    payload: TransactionUpdate,
+    payee: str,
+    amount_display: str,
+    summary: str,
+    ynab_client: YNABClient,
+    dry_run: bool,
+) -> bool:
+    """Send memo update to YNAB (or simulate for dry-run). Returns True on success."""
+    if dry_run:
+        print(f"  [dry-run] would enrich {payee} {amount_display}: {summary}")
+        return True
+    try:
+        ynab_client.update_transaction(transaction["id"], payload)
+        print(f"  ✓ Enriched {payee} {amount_display}: {summary}")
+        return True
+    except (YNABAPIError, requests.exceptions.RequestException, OSError) as exc:
+        logger.error("Failed to enrich transaction %s: %s", transaction["id"], exc)
+        print(f"  ✗ Failed to enrich {payee} {amount_display}: {exc}")
+        return False
 
 
 def process_batch(
@@ -46,26 +93,8 @@ def process_batch(
         if order.order_id:
             used_order_ids.add(order.order_id)
 
-        original_memo = transaction.get("memo")
-        existing_memo = original_memo if isinstance(original_memo, str) else ""
-        memo = build_batch_memo(
-            order,
-            memo_generator,
-            existing_memo,
-        )
+        memo = _resolve_batch_memo_candidate(transaction, order, memo_generator)
         if memo is None:
-            logger.info(
-                "Skipping transaction %s because enrichment would truncate its memo.",
-                transaction["id"],
-            )
-            skipped += 1
-            continue
-
-        if memo == existing_memo:
-            logger.info(
-                "Skipping transaction %s because its memo is already enriched.",
-                transaction["id"],
-            )
             skipped += 1
             continue
 
@@ -76,18 +105,11 @@ def process_batch(
         summary = memo.splitlines()[0] if memo else ""
         amount_display = format_currency_amount(amount_float, order.currency)
 
-        if dry_run:
-            print(f"  [dry-run] would enrich {payee} {amount_display}: {summary}")
+        if _apply_batch_enrichment(
+            transaction, payload, payee, amount_display, summary, ynab_client, dry_run
+        ):
             enriched += 1
-            continue
-
-        try:
-            ynab_client.update_transaction(transaction["id"], payload)
-            print(f"  ✓ Enriched {payee} {amount_display}: {summary}")
-            enriched += 1
-        except (YNABAPIError, requests.exceptions.RequestException, OSError) as exc:
-            logger.error("Failed to enrich transaction %s: %s", transaction["id"], exc)
-            print(f"  ✗ Failed to enrich {payee} {amount_display}: {exc}")
+        else:
             failed += 1
 
     return enriched, skipped, failed

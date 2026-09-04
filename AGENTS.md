@@ -22,9 +22,15 @@ python -X utf8 -m pytest tests/ --cov=src --cov-report=html
 # Type checking (portable, repo-local)
 uv run --extra dev ty check src tests
 
+# Architecture / drift boundary checks
+uv run --extra dev tach check
+
 # Formatting / lint
 uv run --extra dev ruff format src tests
 uv run --extra dev ruff check src tests --fix
+
+# Pre-commit hooks (all stages: lint, types, tach, vibedrift, typos, gitleaks, pytest)
+uv run --extra dev pre-commit run --all-files
 
 # Run locally
 python -X utf8 -m ynab_amazon_categorizer
