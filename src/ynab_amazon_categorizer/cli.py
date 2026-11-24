@@ -46,6 +46,13 @@ from .ynab_client import YNABClient
 
 logger = logging.getLogger(__name__)
 
+# Parsed orders shown before the rest are summarized as "... and N more".
+_ORDER_PREVIEW_COUNT = 3
+# Trailing characters of the budget ID echoed back to confirm the config.
+_BUDGET_ID_SUFFIX_LEN = 4
+# Consecutive empty answers that cancel the prompt.
+_MAX_EMPTY_INPUTS = 2
+
 
 def _env_flag(var_name: str, default: bool = False) -> bool:
     """Read a boolean flag from the environment (e.g. a .env file).
@@ -83,13 +90,13 @@ def prompt_for_amazon_orders_data() -> list[Order] | None:
     # Show what was parsed
     if parsed_orders:
         print(f"\n✓ Successfully parsed {len(parsed_orders)} orders from Amazon data")
-        for order in parsed_orders[:3]:
+        for order in parsed_orders[:_ORDER_PREVIEW_COUNT]:
             print(
                 f"  - Order {order.order_id}: "
                 f"{format_currency_amount(order.total, order.currency)} on {order.date_str}",
             )
-        if len(parsed_orders) > 3:
-            print(f"  ... and {len(parsed_orders) - 3} more orders")
+        if len(parsed_orders) > _ORDER_PREVIEW_COUNT:
+            print(f"  ... and {len(parsed_orders) - _ORDER_PREVIEW_COUNT} more orders")
     else:
         print("\nNo orders could be parsed from the provided text.")
         print("This might be due to formatting differences in the copied text.")
@@ -200,8 +207,8 @@ def print_config_summary(config: Config) -> None:
     print(f"ynab-amazon-categorizer v{__version__}")
     print("✓ Configuration loaded successfully")
     print("✓ API Key: configured")
-    if config.budget_id and len(config.budget_id) >= 4:
-        print(f"✓ Budget ID: ...{config.budget_id[-4:]}")
+    if config.budget_id and len(config.budget_id) >= _BUDGET_ID_SUFFIX_LEN:
+        print(f"✓ Budget ID: ...{config.budget_id[-_BUDGET_ID_SUFFIX_LEN:]}")
     else:
         print("✓ Budget ID: configured")
     if config.account_id:
@@ -330,7 +337,7 @@ def prompt_for_category_selection(
             ).strip()
             if not user_input:
                 empty_streak += 1
-                if empty_streak >= 2:
+                if empty_streak >= _MAX_EMPTY_INPUTS:
                     return None, None
                 print(
                     "Press Enter again with nothing typed to go back, "
@@ -1123,14 +1130,14 @@ def _collect_parsed_orders() -> list[Order] | None:
         return parsed_orders
 
     print(f"✓ Parsed {len(parsed_orders)} orders from Amazon data")
-    for order in parsed_orders[:3]:
+    for order in parsed_orders[:_ORDER_PREVIEW_COUNT]:
         print(
             f"  - Order {order.order_id}: "
             f"{format_currency_amount(order.total, order.currency)} "
             f"({len(order.items)} items)",
         )
-    if len(parsed_orders) > 3:
-        print(f"  ... and {len(parsed_orders) - 3} more orders")
+    if len(parsed_orders) > _ORDER_PREVIEW_COUNT:
+        print(f"  ... and {len(parsed_orders) - _ORDER_PREVIEW_COUNT} more orders")
     return parsed_orders
 
 
