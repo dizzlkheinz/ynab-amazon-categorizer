@@ -47,9 +47,9 @@ class Config:
 
         amazon_domain = os.getenv("AMAZON_DOMAIN", "amazon.ca")
 
-        if not api_key:
+        if api_key is None or not api_key:
             raise ConfigurationError("YNAB_API_KEY environment variable is required")
-        if not budget_id:
+        if budget_id is None or not budget_id:
             raise ConfigurationError("YNAB_BUDGET_ID environment variable is required")
 
         return cls(api_key, budget_id, account_id, amazon_domain)

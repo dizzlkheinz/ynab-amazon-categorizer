@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 
-from .amazon_parser import Order
+from .models import Order
 
 
 def _parse_transaction_date(date_str: str) -> datetime | None:
@@ -16,7 +16,7 @@ def _parse_transaction_date(date_str: str) -> datetime | None:
 
 def _parse_order_date(date_str: str | None) -> datetime | None:
     """Parse order date in 'Month DD, YYYY' format."""
-    if not date_str:
+    if date_str is None or not date_str:
         return None
     try:
         return datetime.strptime(date_str, "%B %d, %Y")
@@ -87,7 +87,7 @@ def _is_amount_candidate(
     if order.total is None:
         return False
     if (
-        used_order_ids
+        used_order_ids is not None
         and order.order_id is not None
         and order.order_id in used_order_ids
     ):
@@ -111,9 +111,6 @@ def _is_within_date_window(
 
 class TransactionMatcher:
     """Matches Amazon orders with YNAB transactions."""
-
-    def __init__(self) -> None:
-        pass
 
     def find_matching_order(
         self,

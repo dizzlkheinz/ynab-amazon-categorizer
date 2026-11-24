@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["ynab", "amazon", "budgeting", "finance", "automation"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 7 - Inactive",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",
@@ -35,8 +35,9 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.0",
-    "ty==0.0.78",
+    "ty==0.0.100",
     "tach>=0.35.0",
+    "complexipy>=5.0.0",
 ]
 
 [project.urls]
@@ -53,9 +54,6 @@ fallback_version = "0.0.0+unknown"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-ynab_amazon_categorizer = ["*.txt", "*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -88,12 +86,47 @@ exclude_lines = [
 ]
 
 [tool.ruff]
-# Rule selection and the ignore list are shared: ../githooks/ruff.toml
-# (select = ["ALL"]). Only project-specific settings stay here.
-extend = "../githooks/ruff.toml"
 target-version = "py312"
+line-length = 88
 extend-exclude = ["src/ynab_amazon_categorizer/_version.py"]
 
 [tool.ruff.lint]
-# Amazon order dates are naive local dates with no zone information.
-extend-ignore = ["DTZ007"]
+select = ["ALL"]
+ignore = [
+    # Owned by ruff format
+    "COM812",  # missing trailing comma
+    "E501",    # line too long
+
+    # Docstring conventions
+    "CPY001",  # missing copyright notice
+    "D107",    # undocumented __init__ (class docstring carries the contract)
+    "D203",    # conflicts with D211 (no blank line before class)
+    "D213",    # conflicts with D212 (summary on first line)
+
+    # Deliberate API and CLI design choices
+    "ANN401",  # Any is needed for dynamic JSON payloads and item_details
+    "DTZ007",  # Amazon order dates are naive local dates with no timezone
+    "FBT001",  # positional boolean flags (dry_run, include_reconciled)
+    "FBT002",  # boolean default value in positional arguments
+    "FBT003",  # boolean positional value in call
+    "PLR0913", # dependencies passed explicitly to orchestration helpers
+    "PLR0917", # positional arguments to orchestration helpers
+    "T201",    # print() is the CLI output mechanism
+
+    # Exception and logging style
+    "EM101",   # string literal in exception
+    "EM102",   # f-string in exception
+    "TRY003",  # message text lives directly in raise
+    "TRY004",  # ValueError by contract for payload validation
+    "TRY400",  # logger.error avoids noisy tracebacks in CLI
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN", "ARG002", "ARG005", "D", "PLR2004", "S101", "SLF001", "TC"]
+
+[tool.ruff.lint.pylint]
+# Guard-clause chains in amazon_parser.py read best as flat early returns.
+max-returns = 8
+
+[tool.ty.rules]
+all = "error"

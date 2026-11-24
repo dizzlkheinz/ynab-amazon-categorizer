@@ -1,12 +1,11 @@
 """Tests for extracted CLI helper functions."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock
 
 import pytest
 
 import ynab_amazon_categorizer.cli as cli_module
-from ynab_amazon_categorizer.amazon_parser import Order
 from ynab_amazon_categorizer.batch import process_batch
 from ynab_amazon_categorizer.cli import (
     _env_flag,
@@ -30,6 +29,7 @@ from ynab_amazon_categorizer.memo_generator import (
     build_batch_memo,
     generate_split_summary_memo,
 )
+from ynab_amazon_categorizer.models import Order
 from ynab_amazon_categorizer.payloads import (
     build_memo_only_payload,
     build_single_payload,
@@ -805,7 +805,7 @@ def test_build_batch_memo_refuses_to_truncate_existing_memo() -> None:
     assert build_batch_memo(order, MemoGenerator(), existing) is None
 
 
-def _batch_txn(txn_id: str, amount: int) -> dict:
+def _batch_txn(txn_id: str, amount: int) -> dict[str, Any]:
     return {
         "id": txn_id,
         "account_id": "a1",

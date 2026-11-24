@@ -17,12 +17,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         fetch-depth: 0  # Fetch full history and tags for setuptools-scm
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10
+      uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
       with:
         python-version: "3.12"
 
@@ -33,7 +33,7 @@ jobs:
       run: uvx twine check dist/*
 
     - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # release/v1
 
   create-release:
     needs: [publish]
@@ -43,7 +43,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         fetch-depth: 0
 
@@ -62,8 +62,8 @@ jobs:
           CHANGELOG=$(git log --pretty=format:"- %s" --max-count=10)
         fi
 
-        # Create changelog file
-        cat > CHANGELOG.md << EOF
+        # Create release notes file (avoid overwriting repo CHANGELOG.md)
+        cat > RELEASE_NOTES.md << EOF
         ## What's Changed
 
         $CHANGELOG
@@ -94,11 +94,11 @@ jobs:
         EOF
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
       with:
         tag_name: ${{ steps.version.outputs.VERSION }}
         name: Release ${{ steps.version.outputs.VERSION }}
-        body_path: CHANGELOG.md
+        body_path: RELEASE_NOTES.md
         files: |
           README.md
         draft: false

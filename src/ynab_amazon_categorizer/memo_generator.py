@@ -41,7 +41,7 @@ def sanitize_memo(memo: str, max_length: int = YNAB_MEMO_MAX_LENGTH) -> str:
     # Try to preserve the order link at the end
     link_match = re.search(r"(https://www\.\S+)$", memo)
     if link_match:
-        link = link_match.group(1)
+        link = str(link_match.group(1))
         available = max_length - len(link) - len(_LINK_SEPARATOR)
         if available > MIN_MEMO_TEXT_BEFORE_LINK:
             return memo[:available].rstrip() + _LINK_SEPARATOR + link
@@ -76,7 +76,9 @@ def build_batch_memo(
     """
     items_text = generate_split_summary_memo(order) or "Amazon Purchase"
     order_link = memo_generator.generate_amazon_order_link(order.order_id)
-    enrichment = f"{items_text}\n {order_link}" if order_link else items_text
+    enrichment = (
+        f"{items_text}\n {order_link}" if order_link is not None else items_text
+    )
     original = sanitize_memo(original_memo)
 
     if not original:
@@ -90,7 +92,7 @@ def build_batch_memo(
     if len(candidate) <= YNAB_MEMO_MAX_LENGTH:
         return sanitize_memo(candidate)
 
-    if order_link:
+    if order_link is not None:
         link_only_candidate = f"{original}\n{order_link}"
         if len(link_only_candidate) <= YNAB_MEMO_MAX_LENGTH:
             return sanitize_memo(link_only_candidate)
@@ -132,7 +134,7 @@ class MemoGenerator:
 
     def generate_amazon_order_link(self, order_id: str | None) -> str | None:
         """Generate an Amazon order link from an order ID."""
-        if order_id:
+        if order_id is not None and order_id:
             return f"https://www.{self.amazon_domain}/gp/your-account/order-details?ie=UTF8&orderID={order_id}"
         return None
 
@@ -148,11 +150,11 @@ class MemoGenerator:
             memo_parts.append(original_memo)
 
         details_str = _format_item_details(item_details)
-        if details_str:
+        if details_str is not None and details_str:
             memo_parts.append(details_str)
 
         order_link = self.generate_amazon_order_link(order_id)
-        if order_link:
+        if order_link is not None:
             memo_parts.append(f"Amazon Order: {order_link}")
 
         raw = "\n\n".join(memo_parts) if memo_parts else ""

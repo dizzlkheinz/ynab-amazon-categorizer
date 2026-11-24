@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-24
+
+Final maintenance release preparing the repository for archival and community handoff.
+
+### Changed
+
+- Mark package classifier as `Development Status :: 7 - Inactive` and document archival/handoff status across `README.md`, `DEVELOPMENT.md`, and `AGENTS.md`
+- Make Ruff (`select = ["ALL"]`), `ty` (`rules.all = "error"`), and `complexipy` (`<= 10`) configurations self-contained inside `pyproject.toml`, and add `complexipy` to `[project.optional-dependencies].dev`
+- Clean up module dependency boundaries so `transaction_matcher` imports `Order` from `models` instead of `amazon_parser` (updated `tach.toml`)
+- Refactor `_deduplicate_and_badge_filter`, `prompt_for_category_selection`, `_prompt_split_amount_milliunits`, and `_run_action_loop` so every function across `src/` and `tests/` has cognitive complexity `<= 10`
+- Resolve all `ty` strict diagnostics (`@override`, narrowed return types, typed test helpers) and eliminate all `# type: ignore` and `# noqa` suppressions
+- Update `README.md`, `.env.example`, `DEVELOPMENT.md`, and `AGENTS.md` to accurately document all CLI flags, optional environment variables, tax-aware splitting, and current validation/release workflows
+
+### Added
+
+- Add `.github/workflows/ci.yml` running tests (Ubuntu + Windows, Python 3.12 & 3.13), Ruff format/lint, `ty`, `tach`, `complexipy`, and wheel build/smoke-test checks
+
+### Fixed
+
+- Update `.github/workflows/release.yml` to generate `RELEASE_NOTES.md` instead of overwriting the repository `CHANGELOG.md`
+- Fix stale docstring on `get_multiline_input_with_custom_submit` (`Alt+Enter`, not `Ctrl+J`)
+
+### Removed
+
+- Remove orphaned local-only hook and drift configs (`.githooks/`, `.vibedrift/`, `.vibedriftignore`), unused `setuptools` `package-data` glob, redundant empty `TransactionMatcher.__init__`, leftover refactoring comments, and stale `.gitignore` backup entry
+
 ## [2.5.1] - 2026-09-04
 
 ### Fixed

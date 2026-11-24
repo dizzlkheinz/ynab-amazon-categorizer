@@ -37,6 +37,7 @@ ENV/
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+.complexipy_cache/
 .uv-cache/
 
 # IDE
@@ -58,9 +59,6 @@ RELEASE_NOTES.md
 temp_release.json
 release/
 .claude/
-
-# Backups
-ynab_amazon_categorizer.py.backup
 
 # Auto-generated files
 src/ynab_amazon_categorizer/_version.py

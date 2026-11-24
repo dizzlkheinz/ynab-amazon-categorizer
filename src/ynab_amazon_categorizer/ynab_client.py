@@ -28,7 +28,7 @@ HTTP_TOO_MANY_REQUESTS = 429
 
 def _raise_for_ynab_status(response: requests.Response) -> None:
     """Raise a typed exception based on YNAB API response status code."""
-    status: int = response.status_code  # type: ignore[assignment]
+    status = response.status_code
     if status < HTTP_BAD_REQUEST:
         return
 
@@ -137,7 +137,8 @@ class YNABClient:
         """Find the Internal Master Category group ID to exclude it."""
         for group in category_groups:
             if group.get("name") == "Internal Master Category":
-                return group.get("id")
+                group_id = group.get("id")
+                return group_id if isinstance(group_id, str) else None
         return None
 
     def _process_category_group(

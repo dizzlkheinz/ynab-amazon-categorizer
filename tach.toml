@@ -29,7 +29,7 @@ depends_on = ["ynab_amazon_categorizer.models"]
 
 [[modules]]
 path = "ynab_amazon_categorizer.transaction_matcher"
-depends_on = ["ynab_amazon_categorizer.amazon_parser"]
+depends_on = ["ynab_amazon_categorizer.models"]
 
 [[modules]]
 path = "ynab_amazon_categorizer.payloads"

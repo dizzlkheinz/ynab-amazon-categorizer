@@ -223,7 +223,7 @@ def test_update_transaction_auth_error() -> None:
         client.update_transaction("trans_123", {"memo": "test"})
 
 
-def test_get_categories_calls_get_data() -> None:
+def test_get_categories_calls_get_data(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that get_categories properly calls get_data method."""
     client = YNABClient("test_key", "test_budget")
 
@@ -246,7 +246,7 @@ def test_get_categories_calls_get_data() -> None:
             ]
         }
     )
-    client.get_data = mock_get_data  # type: ignore[method-assign]
+    monkeypatch.setattr(client, "get_data", mock_get_data)
 
     categories, name_to_id, id_to_name = client.get_categories()
 
@@ -257,10 +257,12 @@ def test_get_categories_calls_get_data() -> None:
     assert "cat1" in id_to_name
 
 
-def test_get_categories_logs_warning_on_failure() -> None:
+def test_get_categories_logs_warning_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Test that get_categories logs a warning when data fetch fails."""
     client = YNABClient("test_key", "test_budget")
-    client.get_data = Mock(return_value=None)  # type: ignore[method-assign]
+    monkeypatch.setattr(client, "get_data", Mock(return_value=None))
 
     categories, name_to_id, id_to_name = client.get_categories()
 

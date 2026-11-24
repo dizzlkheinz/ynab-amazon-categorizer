@@ -87,7 +87,7 @@ def _enrich_one(
     # A confident match belongs to this transaction even when enrichment is
     # unnecessary or impossible. Do not let a later same-amount transaction
     # reuse the order merely because this transaction does not get updated.
-    if order.order_id:
+    if order.order_id is not None and order.order_id:
         used_order_ids.add(order.order_id)
 
     memo = _resolve_batch_memo_candidate(transaction, order, memo_generator)

@@ -185,6 +185,15 @@ def _resolve_badge_item(item: str, candidate_texts: set[str]) -> tuple[str, int]
     return item, 1
 
 
+def _append_item_copies(unique_items: list[str], item: str, qty: int) -> bool:
+    """Append up to `qty` copies of `item`, returning True when capped."""
+    for _ in range(qty):
+        if len(unique_items) >= MAX_ITEMS_PER_ORDER:
+            return True
+        unique_items.append(item)
+    return len(unique_items) >= MAX_ITEMS_PER_ORDER
+
+
 class AmazonParser:
     """Parses Amazon order data from order history pages."""
 
@@ -459,12 +468,8 @@ class AmazonParser:
                 continue
 
             seen.add(normalized)
-            for _ in range(qty):
-                if len(unique_items) >= MAX_ITEMS_PER_ORDER:
-                    break
-                unique_items.append(normalized)
             last_kept_had_leading_space = had_leading_space
-            if len(unique_items) >= MAX_ITEMS_PER_ORDER:
+            if _append_item_copies(unique_items, normalized, qty):
                 break
         return unique_items
 
@@ -476,7 +481,7 @@ class AmazonParser:
         for line in order_content.split("\n"):
             had_leading_space = line[:1].isspace() if line else False
             cleaned = self._get_valid_cleaned_item(line)
-            if cleaned:
+            if cleaned is not None:
                 candidates.append((cleaned, had_leading_space))
 
         return self._deduplicate_and_badge_filter(candidates)

@@ -28,7 +28,7 @@ def fetch_amazon_transactions(
 ) -> list[YNABTransaction]:
     """Fetch and validate uncategorized, non-transfer Amazon transactions."""
     endpoint = f"/budgets/{config.budget_id}/transactions"
-    if config.account_id:
+    if config.account_id is not None and config.account_id:
         endpoint = (
             f"/budgets/{config.budget_id}/accounts/{config.account_id}/transactions"
         )
@@ -69,5 +69,5 @@ def _should_process(
         and (include_reconciled or transaction.get("cleared") != "reconciled")
         and transaction["amount"] != 0
         and transaction.get("transfer_account_id") is None
-        and not transaction.get("subtransactions"),
+        and not bool(transaction.get("subtransactions")),
     )

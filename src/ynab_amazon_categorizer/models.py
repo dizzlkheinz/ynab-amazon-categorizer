@@ -21,7 +21,7 @@ class Order:
 
 
 def format_currency_amount(amount: float | None, currency: str | None = None) -> str:
-    """Format an amount with its parsed currency, defaulting legacy orders to dollars."""
+    """Format an amount with its parsed currency, defaulting to dollars when omitted."""
     if amount is None:
         return "N/A"
     sign = "-" if amount < 0 else ""
