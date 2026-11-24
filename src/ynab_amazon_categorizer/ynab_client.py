@@ -107,7 +107,7 @@ class YNABClient:
     def update_transaction(
         self,
         transaction_id: str,
-        payload: Mapping[str, object],
+        payload: Mapping[str, Any],
     ) -> bool:
         """Update a YNAB transaction.
 
